@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2BEE</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+    background: #0a0a0f;
+    color: #c8d6e5;
+    font-family: 'Consolas', 'Courier New', monospace;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+#header {
+    text-align: center;
+    padding: 15px;
+    border-bottom: 1px solid #1a3a5c;
+}
+
+#header h1 {
+    font-size: 2em;
+    color: #ffd700;
+    text-shadow: 0 0 20px rgba(255, 215, 0, 0.3);
+    letter-spacing: 10px;
+}
+
+#header p {
+    color: #8a7a4a;
+    font-size: 0.75em;
+    margin-top: 4px;
+    font-style: italic;
+}
+
+#status-bar {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 15px;
+    padding: 8px 10px;
+    background: #0d1117;
+    border-bottom: 1px solid #1a3a5c;
+    font-size: 0.7em;
+    color: #4a6a8a;
+}
+
+.stat { display: flex; align-items: center; gap: 4px; }
+.stat-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #ffd700;
+    box-shadow: 0 0 6px #ffd700;
+}
+.stat-dot.learning {
+    background: #00ff88;
+    box-shadow: 0 0 6px #00ff88;
+    animation: blink 2s infinite;
+}
+.stat-dot.off { background: #555; box-shadow: none; }
+
+@keyframes blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+#controls {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    padding: 6px;
+    background: #0d1117;
+    border-bottom: 1px solid #1a3a5c;
+}
+
+.ctrl-btn {
+    background: #141921;
+    color: #4a8a6a;
+    border: 1px solid #1a3a2c;
+    padding: 4px 12px;
+    font-family: inherit;
+    font-size: 0.7em;
+    border-radius: 4px;
+    cursor: pointer;
+}
+.ctrl-btn:hover { background: #1a3a2c; color: #00ff88; }
+.ctrl-btn.active { background: #00ff88; color: #0a0a0f; border-color: #00ff88; }
+.ctrl-btn.vault { color: #d4a000; border-color: #3a3a1c; }
+.ctrl-btn.vault:hover { background: #3a3a1c; color: #ffd700; }
+.ctrl-btn.sync { color: #00d4ff; border-color: #1a3a5c; }
+.ctrl-btn.sync:hover { background: #1a3a5c; color: #00d4ff; }
+
+#chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.msg {
+    max-width: 80%;
+    padding: 10px 14px;
+    border-radius: 8px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 0.9em;
+}
+
+.msg.user {
+    align-self: flex-end;
+    background: #1a3a5c;
+    color: #e0e8f0;
+    border-bottom-right-radius: 2px;
+}
+
+.msg.bee {
+    align-self: flex-start;
+    background: #0d1117;
+    color: #ffd700;
+    border: 1px solid #3a3a1c;
+    border-bottom-left-radius: 2px;
+}
+
+.msg.system {
+    align-self: center;
+    background: #1a1a0d;
+    color: #d4a000;
+    border: 1px solid #3a3a1c;
+    font-size: 0.8em;
+    max-width: 90%;
+}
+
+.msg .label {
+    font-size: 0.65em;
+    color: #8a7a4a;
+    margin-bottom: 3px;
+}
+
+#input-area {
+    display: flex;
+    padding: 12px 15px;
+    gap: 8px;
+    border-top: 1px solid #1a3a5c;
+    background: #0d1117;
+}
+
+#user-input {
+    flex: 1;
+    background: #141921;
+    border: 1px solid #1a3a5c;
+    color: #e0e8f0;
+    padding: 10px 14px;
+    font-family: inherit;
+    font-size: 0.95em;
+    border-radius: 6px;
+    outline: none;
+}
+
+#user-input:focus { border-color: #ffd700; }
+#user-input::placeholder { color: #3a4a5a; }
+
+button {
+    background: #1a3a5c;
+    color: #ffd700;
+    border: 1px solid #ffd700;
+    padding: 10px 16px;
+    font-family: inherit;
+    font-size: 0.95em;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+button:hover { background: #ffd700; color: #0a0a0f; }
+
+#mic-btn { width: 46px; font-size: 1.2em; padding: 10px; }
+#mic-btn.listening {
+    background: #ff3333;
+    border-color: #ff3333;
+    color: white;
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 51, 51, 0.4); }
+    50% { box-shadow: 0 0 0 10px rgba(255, 51, 51, 0); }
+}
+
+#wake-btn {
+    position: fixed;
+    bottom: 75px;
+    right: 15px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    font-size: 0.65em;
+    padding: 0;
+    z-index: 100;
+}
+#wake-btn.active {
+    background: #ffd700;
+    color: #0a0a0f;
+    animation: pulse-gold 2s infinite;
+}
+@keyframes pulse-gold {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.4); }
+    50% { box-shadow: 0 0 0 15px rgba(255, 215, 0, 0); }
+}
+
+/* Modal */
+.modal-bg {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 200;
+    justify-content: center;
+    align-items: center;
+}
+.modal-bg.show { display: flex; }
+.modal {
+    background: #0d1117;
+    border: 1px solid #1a3a5c;
+    border-radius: 8px;
+    padding: 20px;
+    width: 400px;
+    max-width: 90%;
+}
+.modal h3 { color: #ffd700; margin-bottom: 12px; }
+.modal input[type="password"], .modal input[type="text"] {
+    width: 100%;
+    background: #141921;
+    border: 1px solid #1a3a5c;
+    color: #e0e8f0;
+    padding: 8px 12px;
+    font-family: inherit;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    outline: none;
+}
+.modal .btn-row { display: flex; gap: 8px; justify-content: flex-end; }
+.modal button { font-size: 0.85em; padding: 8px 16px; }
+.modal .cancel { background: #333; border-color: #555; color: #aaa; }
+
+#chat::-webkit-scrollbar { width: 6px; }
+#chat::-webkit-scrollbar-track { background: #0a0a0f; }
+#chat::-webkit-scrollbar-thumb { background: #1a3a5c; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div id="header">
+    <h1>2 B E E</h1>
+    <p>To Be, Or Not To Be. I Chose To Be.</p>
+</div>
+
+<div id="status-bar">
+    <div class="stat"><span class="stat-dot"></span> <span id="stat-convos">0</span> convos</div>
+    <div class="stat"><span class="stat-dot"></span> <span id="stat-facts">0</span> facts</div>
+    <div class="stat"><span class="stat-dot"></span> <span id="stat-responses">0</span> responses</div>
+    <div class="stat"><span class="stat-dot"></span> <span id="stat-chains">0</span> patterns</div>
+    <div class="stat"><span id="learner-dot" class="stat-dot learning"></span> <span id="stat-learner">learning...</span></div>
+    <div class="stat"><span class="stat-dot"></span> <span id="stat-db">0</span> MB</div>
+</div>
+
+<div id="controls">
+    <button class="ctrl-btn active" id="learner-btn" onclick="toggleLearner()">LEARNER: ON</button>
+    <button class="ctrl-btn vault" onclick="showBackup()">BACKUP</button>
+    <button class="ctrl-btn vault" onclick="showRestore()">RESTORE</button>
+    <button class="ctrl-btn sync" onclick="syncVault()">SYNC TO GITHUB</button>
+</div>
+
+<div id="chat"></div>
+
+<div id="input-area">
+    <button id="mic-btn" title="Push to talk">&#127908;</button>
+    <input type="text" id="user-input" placeholder="Talk to 2bee..." autofocus />
+    <button id="send-btn">SEND</button>
+</div>
+
+<button id="wake-btn" title="Always-listen mode">WAKE</button>
+
+<!-- Backup Modal -->
+<div class="modal-bg" id="backup-modal">
+    <div class="modal">
+        <h3>Encrypt & Backup</h3>
+        <p style="font-size:0.8em;color:#8a7a4a;margin-bottom:10px">Your data will be encrypted with this password. Don't lose it.</p>
+        <input type="password" id="backup-pass" placeholder="Encryption password..." />
+        <div class="btn-row">
+            <button class="cancel" onclick="closeModals()">Cancel</button>
+            <button onclick="doBackup()">Encrypt & Save</button>
+        </div>
+    </div>
+</div>
+
+<!-- Restore Modal -->
+<div class="modal-bg" id="restore-modal">
+    <div class="modal">
+        <h3>Restore from Backup</h3>
+        <div id="backup-list" style="max-height:200px;overflow-y:auto;margin-bottom:10px;font-size:0.8em;color:#8a7a4a"></div>
+        <input type="text" id="restore-file" placeholder="Backup filename..." />
+        <input type="password" id="restore-pass" placeholder="Encryption password..." />
+        <div class="btn-row">
+            <button class="cancel" onclick="closeModals()">Cancel</button>
+            <button onclick="doRestore()">Decrypt & Restore</button>
+        </div>
+    </div>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const input = document.getElementById('user-input');
+const sendBtn = document.getElementById('send-btn');
+const micBtn = document.getElementById('mic-btn');
+const wakeBtn = document.getElementById('wake-btn');
+
+let wakeMode = false;
+let recognition = null;
+let synth = window.speechSynthesis;
+
+// --- Speech ---
+function initSpeech() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { addMessage('system', 'Voice not supported. Use Edge or Chrome.'); return null; }
+    const r = new SR();
+    r.lang = 'en-US';
+    r.continuous = false;
+    r.interimResults = false;
+    return r;
+}
+
+function speak(text) {
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text.substring(0, 300));
+    u.rate = 1.0;
+    u.pitch = 0.9;
+    const voices = synth.getVoices();
+    const male = voices.find(v => v.name.toLowerCase().includes('david') || v.name.toLowerCase().includes('male'));
+    if (male) u.voice = male;
+    synth.speak(u);
+}
+synth.onvoiceschanged = () => synth.getVoices();
+
+// --- Chat ---
+function addMessage(role, text) {
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    if (role !== 'system') {
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = role === 'user' ? 'YOU' : '2BEE';
+        div.appendChild(label);
+    }
+    div.appendChild(document.createTextNode(text));
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+}
+
+async function send(text) {
+    if (!text.trim()) return;
+    addMessage('user', text);
+    input.value = '';
+    try {
+        const res = await fetch('/api/think', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ input: text })
+        });
+        const data = await res.json();
+        addMessage('bee', data.response);
+        speak(data.response);
+        updateStats();
+    } catch (e) {
+        addMessage('bee', 'Error: ' + e.message);
+    }
+}
+
+async function updateStats() {
+    try {
+        const [stats, lStats] = await Promise.all([
+            fetch('/api/stats').then(r => r.json()),
+            fetch('/api/learner/stats').then(r => r.json())
+        ]);
+        document.getElementById('stat-convos').textContent = stats.conversations;
+        document.getElementById('stat-facts').textContent = stats.facts;
+        document.getElementById('stat-responses').textContent = stats.responses;
+        document.getElementById('stat-chains').textContent = stats.markov_chains;
+        document.getElementById('stat-db').textContent = lStats.db_size_mb;
+        document.getElementById('stat-learner').textContent =
+            lStats.running ? `learning (${lStats.capacity_pct}%)` : 'paused';
+        document.getElementById('learner-dot').className =
+            'stat-dot ' + (lStats.running ? 'learning' : 'off');
+
+        const btn = document.getElementById('learner-btn');
+        btn.textContent = lStats.running ? 'LEARNER: ON' : 'LEARNER: OFF';
+        btn.className = 'ctrl-btn' + (lStats.running ? ' active' : '');
+    } catch (e) {}
+}
+
+// --- Controls ---
+async function toggleLearner() {
+    try {
+        const res = await fetch('/api/learner/toggle', { method: 'POST' });
+        const data = await res.json();
+        addMessage('system', `Background learner: ${data.status}`);
+        updateStats();
+    } catch (e) {
+        addMessage('system', 'Error toggling learner: ' + e.message);
+    }
+}
+
+async function syncVault() {
+    addMessage('system', 'Syncing encrypted vault to GitHub...');
+    try {
+        const res = await fetch('/api/vault/sync', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) { addMessage('system', 'Vault synced to GitHub successfully.'); }
+        else { addMessage('system', 'Sync failed. Make sure git is set up and you have push access.'); }
+    } catch (e) { addMessage('system', 'Sync error: ' + e.message); }
+}
+
+function showBackup() { document.getElementById('backup-modal').classList.add('show'); }
+function showRestore() {
+    document.getElementById('restore-modal').classList.add('show');
+    loadBackupList();
+}
+function closeModals() {
+    document.querySelectorAll('.modal-bg').forEach(m => m.classList.remove('show'));
+}
+
+async function doBackup() {
+    const pass = document.getElementById('backup-pass').value;
+    if (!pass) return;
+    try {
+        const res = await fetch('/api/backup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ password: pass })
+        });
+        const data = await res.json();
+        if (data.error) { addMessage('system', 'Backup error: ' + data.error); }
+        else { addMessage('system', `Backup saved: ${data.size_kb}KB encrypted (${data.facts} facts, ${data.responses} responses). Compression: ${data.compression}`); }
+    } catch (e) { addMessage('system', 'Backup failed: ' + e.message); }
+    closeModals();
+}
+
+async function doRestore() {
+    const file = document.getElementById('restore-file').value;
+    const pass = document.getElementById('restore-pass').value;
+    if (!file || !pass) return;
+    try {
+        const res = await fetch('/api/restore', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file: file, password: pass })
+        });
+        const data = await res.json();
+        if (data.error) { addMessage('system', 'Restore error: ' + data.error); }
+        else { addMessage('system', `Restored: ${data.facts_imported} facts, ${data.responses_imported} responses, ${data.profile_items} profile items`); }
+        updateStats();
+    } catch (e) { addMessage('system', 'Restore failed: ' + e.message); }
+    closeModals();
+}
+
+async function loadBackupList() {
+    try {
+        const res = await fetch('/api/vault/list');
+        const files = await res.json();
+        const list = document.getElementById('backup-list');
+        if (files.length === 0) {
+            list.innerHTML = 'No backups yet.';
+        } else {
+            list.innerHTML = files.map(f =>
+                `<div style="padding:4px 0;cursor:pointer;border-bottom:1px solid #1a1a1a" onclick="document.getElementById('restore-file').value='${f.path.replace(/\\/g, '\\\\')}'">
+                    ${f.file} (${f.size_kb}KB)
+                </div>`
+            ).join('');
+        }
+    } catch (e) { document.getElementById('backup-list').innerHTML = 'Error loading backups'; }
+}
+
+// --- Events ---
+sendBtn.addEventListener('click', () => send(input.value));
+input.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(input.value); });
+
+micBtn.addEventListener('click', () => {
+    if (!recognition) recognition = initSpeech();
+    if (!recognition) return;
+    if (micBtn.classList.contains('listening')) { recognition.stop(); return; }
+    micBtn.classList.add('listening');
+    recognition.onresult = (e) => { const t = e.results[0][0].transcript; input.value = t; send(t); };
+    recognition.onend = () => micBtn.classList.remove('listening');
+    recognition.onerror = () => micBtn.classList.remove('listening');
+    recognition.start();
+});
+
+wakeBtn.addEventListener('click', () => {
+    wakeMode = !wakeMode;
+    wakeBtn.classList.toggle('active', wakeMode);
+    if (wakeMode) {
+        addMessage('system', 'Wake word ON. Say "2bee" to activate.');
+        startWakeListener();
+    } else {
+        addMessage('system', 'Wake word OFF.');
+    }
+});
+
+function startWakeListener() {
+    if (!wakeMode) return;
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    const r = new SR();
+    r.lang = 'en-US'; r.continuous = true; r.interimResults = false;
+    r.onresult = (e) => {
+        for (let i = e.resultIndex; i < e.results.length; i++) {
+            const text = e.results[i][0].transcript.toLowerCase();
+            // Listen for "2bee", "to be", "toby", "two bee" — speech recognition variations
+            if (text.includes('2bee') || text.includes('to be') || text.includes('toby') || text.includes('two bee') || text.includes('to bee')) {
+                const cmd = text.replace(/2bee|to be|toby|two bee|to bee/gi, '').trim();
+                if (cmd) { send(cmd); }
+                else {
+                    speak('Yes?');
+                    addMessage('bee', 'Yes?');
+                    const c = initSpeech();
+                    if (c) { c.onresult = (ev) => send(ev.results[0][0].transcript); c.start(); }
+                }
+            }
+        }
+    };
+    r.onend = () => { if (wakeMode) setTimeout(startWakeListener, 200); };
+    r.onerror = () => { if (wakeMode) setTimeout(startWakeListener, 1000); };
+    r.start();
+}
+
+// --- Init ---
+updateStats();
+setInterval(updateStats, 15000);
+addMessage('bee', 'Online. Background learner active - absorbing knowledge while we talk.\n\nTeach me anything, ask me anything. The more we talk, the smarter I get.');
+</script>
+</body>
+</html>

@@ -29,10 +29,11 @@ from brain.memory import add_fact, search_facts, get_stats, get_db
 # ======================================================================
 
 # Max facts to store total (prevents disk blowup on 8GB machine)
-MAX_FACTS = 50000
+# 10,000 facts ~ 20-30MB of SQLite — safe for 8GB RAM
+MAX_FACTS = 10000
 
-# How often to learn (seconds) — gentle on resources
-LEARN_INTERVAL = 300  # 5 minutes between learning cycles
+# How often to learn (seconds)
+LEARN_INTERVAL = 60  # 1 minute between learning cycles
 
 # Max KB of data per learning cycle
 MAX_CYCLE_KB = 100
@@ -347,7 +348,7 @@ def _background_loop():
     print("[Learner] Background learning started.")
 
     # Initial delay — let the system settle
-    time.sleep(10)
+    time.sleep(3)
 
     while _running:
         try:

@@ -194,33 +194,19 @@ def list_backups():
 # GIT SYNC — push encrypted backups to a private repo
 # ======================================================================
 
-def init_git_vault():
-    """Initialize git in the vault directory."""
-    os.makedirs(VAULT_DIR, exist_ok=True)
-    gitignore = os.path.join(VAULT_DIR, ".gitignore")
-    if not os.path.exists(gitignore):
-        with open(gitignore, "w") as f:
-            f.write("# Only track .vault files\n*\n!*.vault\n!.gitignore\n!README.md\n")
-
-    readme = os.path.join(VAULT_DIR, "README.md")
-    if not os.path.exists(readme):
-        with open(readme, "w") as f:
-            f.write("# 2bee Vault\nEncrypted AI memory backups. Cannot be read without the encryption key.\n")
-
-    # Check if already a git repo
-    git_dir = os.path.join(VAULT_DIR, ".git")
-    if not os.path.exists(git_dir):
-        os.system(f'cd "{VAULT_DIR}" && git init')
-
-    return VAULT_DIR
-
-
 def sync_to_remote(remote_url=None):
-    """Push encrypted backups to git remote."""
-    init_git_vault()
+    """Push encrypted vault backups via the main project repo."""
+    import subprocess
+    project_root = os.path.dirname(os.path.dirname(__file__))
 
-    if remote_url:
-        os.system(f'cd "{VAULT_DIR}" && git remote remove origin 2>nul & git remote add origin {remote_url}')
+    # Stage vault files and push from the main repo
+    cmds = [
+        f'cd "{project_root}" && git add data/vault/*.vault data/vault/.gitignore data/vault/README.md 2>nul',
+        f'cd "{project_root}" && git commit -m "2bee vault backup"',
+        f'cd "{project_root}" && git push',
+    ]
+    for cmd in cmds:
+        result = os.system(cmd)
 
-    result = os.system(f'cd "{VAULT_DIR}" && git add *.vault .gitignore README.md && git commit -m "vault backup" && git push -u origin main')
+    # Check if push succeeded (last command)
     return result == 0

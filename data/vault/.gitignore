@@ -1,0 +1,5 @@
+# Only track .vault files
+*
+!*.vault
+!.gitignore
+!README.md

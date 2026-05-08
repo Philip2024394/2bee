@@ -393,7 +393,7 @@ async function updateStats() {
         document.getElementById('stat-chains').textContent = stats.markov_chains;
         document.getElementById('stat-db').textContent = lStats.db_size_mb;
         document.getElementById('stat-learner').textContent =
-            lStats.running ? `learning (${lStats.capacity_pct}%)` : 'paused';
+            lStats.running ? `learning (${lStats.total_facts} facts)` : 'paused';
         document.getElementById('learner-dot').className =
             'stat-dot ' + (lStats.running ? 'learning' : 'off');
 

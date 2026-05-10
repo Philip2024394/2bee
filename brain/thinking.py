@@ -12,6 +12,7 @@ How it works:
 """
 
 import re
+import os
 import random
 import datetime
 import threading
@@ -228,6 +229,10 @@ def classify_intent(text):
         return "time"
     if any(x in lower for x in ("what date", "what's the date", "today's date", "what day is it")):
         return "date"
+    if any(x in lower for x in ("what part of the day", "what part of day", "time of day",
+                                "is it morning", "is it afternoon", "is it evening", "is it night",
+                                "what period", "what's the time of day")):
+        return "time_period"
 
     # Greeting
     greetings = ["hello", "hi", "hey", "yo", "sup", "what's up", "whats up",
@@ -707,6 +712,59 @@ def handle_opinion(text):
         fact = relevant[0]
         return f"Based on what I know: {fact['info']}. But I'd rather hear your take."
     return pick(OPINION_RESPONSES)
+
+
+def get_time_period():
+    """Read the local computer time and return a tuple of:
+      (greeting, period_label, formatted_clock_time)
+
+    Uses the OS local clock (datetime.now()), so whatever Windows is set to
+    flows through. If the OS is on UTC instead of local time, set the SL_TZ
+    env var to "Asia/Jakarta" (or another zone) and we'll convert.
+
+    The period is granular: early morning, morning, late morning, midday,
+    afternoon, evening, night, late night. The greeting is the closest
+    'Good X' phrase that fits the period.
+    """
+    tz_name = os.environ.get("SL_TZ")
+    if tz_name:
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.datetime.now(ZoneInfo(tz_name))
+        except Exception:
+            # Fallback: assume Asia/Jakarta if SL_TZ was set but zoneinfo unavailable.
+            now = datetime.datetime.utcnow() + datetime.timedelta(hours=7)
+    else:
+        now = datetime.datetime.now()
+    h = now.hour
+    # Granular periods. Anything before noon greets with "Good morning"
+    # because that's what feels right when you wake up at 3 AM in Indonesia.
+    if 3 <= h < 6:
+        period = "early morning"
+        greeting = "Good morning"
+    elif 6 <= h < 10:
+        period = "morning"
+        greeting = "Good morning"
+    elif 10 <= h < 12:
+        period = "late morning"
+        greeting = "Good morning"
+    elif 12 <= h < 14:
+        period = "midday"
+        greeting = "Good afternoon"
+    elif 14 <= h < 17:
+        period = "afternoon"
+        greeting = "Good afternoon"
+    elif 17 <= h < 20:
+        period = "evening"
+        greeting = "Good evening"
+    elif 20 <= h < 23:
+        period = "night"
+        greeting = "Good evening"
+    else:  # 23-3
+        period = "late night"
+        greeting = "Good evening"
+    ampm = now.strftime("%I:%M %p").lstrip("0")
+    return greeting, period, ampm
 
 
 def _lookup_grammar(subject):
@@ -1257,8 +1315,8 @@ def process(user_input):
 
         response = f"Generating image: {img_desc[:80]}"
     elif intent == "time":
-        now = datetime.datetime.now()
-        response = now.strftime("It's %I:%M %p.")
+        _, period, ampm = get_time_period()
+        response = f"It's {ampm} — {period}."
     elif intent == "date":
         now = datetime.datetime.now()
         response = now.strftime("Today is %A, %B %d, %Y.")
@@ -1289,24 +1347,12 @@ def process(user_input):
         else:
             response = "What should I search for? Example: 'search code for THEME_PRESETS'"
     elif intent == "address_2bee":
-        # Time-based greeting.
-        now = datetime.datetime.now()
-        h = now.hour
-        if 5 <= h < 12:
-            greeting = "Good morning"
-        elif 12 <= h < 17:
-            greeting = "Good afternoon"
-        elif 17 <= h < 22:
-            greeting = "Good evening"
-        else:
-            greeting = "Good evening"
-        ampm = now.strftime("%I:%M %p").lstrip("0")
+        greeting, period, ampm = get_time_period()
         # Quick news check — try the live news fetcher; gracefully degrade.
         news_line = "There is no major news of today."
         try:
             news = web_learner.fetch_live_news("world")
             if news:
-                # Take the first headline only, trim long text.
                 first = news.strip().split("\n")[0]
                 first = re.sub(r"^\W+", "", first)[:200]
                 if first:
@@ -1315,7 +1361,10 @@ def process(user_input):
             pass
         name = name_or_empty()
         addressed = f", {name.title()}" if name else ""
-        response = f"{greeting}{addressed}. It's {ampm}.\n{news_line}\nWhere shall we kick off?"
+        response = f"{greeting}{addressed}. It's {ampm} — {period}.\n{news_line}\nWhere shall we kick off?"
+    elif intent == "time_period":
+        greeting, period, ampm = get_time_period()
+        response = f"It's {ampm}, which is {period}."
     elif intent == "match_bank_csv":
         # Strip the command keyword if present so only the CSV is parsed.
         csv_text = text

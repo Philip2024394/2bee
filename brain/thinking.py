@@ -1107,11 +1107,7 @@ def process(user_input):
                 img_desc += f', text in {MARKETING_WORDS[lang_code]["name"]} language, hero text says "{hero_text}", CTA text says "{cta_text}"'
                 break
 
-        import urllib.parse
-        seed = random.randint(1, 99999)
-        full_prompt = img_desc + ', full complete image showing header to footer, NO prices NO discounts NO buttons NO UI elements, professional product photography, modern 2026 style, portrait 9:16, 4k quality'
-        img_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(full_prompt)}?width=480&height=854&nologo=true&seed={seed}"
-        response = f"Generating your image.\n\n🎨 {img_url}"
+        response = f"Generating image: {img_desc[:80]}"
     elif intent == "time":
         now = datetime.datetime.now()
         response = now.strftime("It's %I:%M %p.")

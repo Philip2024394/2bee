@@ -116,9 +116,11 @@ def classify_intent(text):
         return "scrape_url"
 
     # Image creation requests — NEVER let LLM handle these
-    if re.search(r'(create|generate|make|draw|design|build|render|show)\s+(me\s+)?(an?\s+)?(image|picture|photo|icon|logo|mockup|screenshot|illustration|graphic|poster|banner|thumbnail)', lower):
+    if re.search(r'(create|generate|make|draw|design|build|render|show)\s+.{0,20}(image|picture|photo|icon|logo|mockup|screenshot|illustration|graphic|poster|banner|thumbnail)', lower):
         return "create_image"
     if re.match(r'(image|picture|photo)\s+(of|on|about|for)\s+', lower):
+        return "create_image"
+    if any(w in lower for w in ['create me', 'generate me', 'make me']) and any(w in lower for w in ['image', 'picture', 'photo', 'tall image', 'theme image']):
         return "create_image"
 
     # News/current events — ALWAYS research, never LLM
@@ -1086,7 +1088,30 @@ def process(user_input):
     elif intent == "who_am_i":
         response = handle_who_am_i()
     elif intent == "create_image":
-        response = "Generating your image now."
+        # Extract the full description — keep all modification requests intact
+        img_desc = text.lower()
+        for remove_word in ['create', 'generate', 'make', 'draw', 'design', 'build', 'render', 'show', 'me', 'please', 'can you', 'i want', 'i need', 'the above', 'a ', 'an ']:
+            img_desc = img_desc.replace(remove_word, '', 1)
+        img_desc = img_desc.strip()
+        if not img_desc or len(img_desc) < 3:
+            img_desc = 'modern product theme design'
+
+        # Check for language requests
+        from brain.languages import MARKETING_WORDS, get_theme_text
+        for lang_name in ['indonesian', 'indonesea', 'indonisia', 'bahasa', 'malay', 'thai', 'vietnamese', 'arabic', 'chinese']:
+            if lang_name in img_desc.lower():
+                lang_code = {'indonesian': 'id', 'indonesea': 'id', 'indonisia': 'id', 'bahasa': 'id',
+                             'malay': 'ms', 'thai': 'th', 'vietnamese': 'vi', 'arabic': 'ar', 'chinese': 'zh'}.get(lang_name, 'id')
+                hero_text = get_theme_text(lang_code, 'hero')
+                cta_text = get_theme_text(lang_code, 'cta')
+                img_desc += f', text in {MARKETING_WORDS[lang_code]["name"]} language, hero text says "{hero_text}", CTA text says "{cta_text}"'
+                break
+
+        import urllib.parse
+        seed = random.randint(1, 99999)
+        full_prompt = img_desc + ', full complete image showing header to footer, NO prices NO discounts NO buttons NO UI elements, professional product photography, modern 2026 style, portrait 9:16, 4k quality'
+        img_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(full_prompt)}?width=480&height=854&nologo=true&seed={seed}"
+        response = f"Generating your image.\n\n🎨 {img_url}"
     elif intent == "time":
         now = datetime.datetime.now()
         response = now.strftime("It's %I:%M %p.")

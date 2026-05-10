@@ -562,6 +562,13 @@ def main():
     except Exception as e:
         print(f"  2B identity: failed ({e})")
 
+    # Load language & marketing words
+    try:
+        from brain.languages import load_languages
+        load_languages()
+    except Exception as e:
+        print(f"  Languages: failed ({e})")
+
     # Load StreetLocal knowledge base (if not already loaded)
     try:
         from brain.streetlocal_knowledge import load_all as load_streetlocal

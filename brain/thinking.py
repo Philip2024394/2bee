@@ -124,7 +124,9 @@ def classify_intent(text):
         return "create_image"
     if re.match(r'(image|picture|photo)\s+(of|on|about|for)\s+', lower):
         return "create_image"
-    if any(w in lower for w in ['create me', 'generate me', 'make me']) and any(w in lower for w in ['image', 'picture', 'photo', 'tall image', 'theme image']):
+    if any(w in lower for w in ['create me', 'generate me', 'make me']) and any(w in lower for w in ['image', 'picture', 'photo', 'tall image', 'theme image', 'design', 'banner', 'new design', 'same design']):
+        return "create_image"
+    if any(w in lower for w in ['create me', 'generate me', 'make me']) and any(w in lower for w in ['same details', 'same style', 'similar', 'like this', 'same size', 'new version']):
         return "create_image"
 
     # News/current events — ALWAYS research, never LLM
@@ -1104,11 +1106,20 @@ def process(user_input):
         else:
             response = "Send me an image URL to analyze. Example: analyze this image https://..."
     elif intent == "create_image":
-        # Extract the full description — keep all modification requests intact
+        # Extract the full description
         img_desc = text.lower()
-        for remove_word in ['create', 'generate', 'make', 'draw', 'design', 'build', 'render', 'show', 'me', 'please', 'can you', 'i want', 'i need', 'the above', 'a ', 'an ']:
+        for remove_word in ['create', 'generate', 'make', 'draw', 'design', 'build', 'render', 'show', 'me', 'please', 'can you', 'i want', 'i need', 'the above', 'a ', 'an ', 'useing', 'using']:
             img_desc = img_desc.replace(remove_word, '', 1)
         img_desc = img_desc.strip()
+
+        # If user says "same details/style" — pull from last vision analysis
+        if any(w in text.lower() for w in ['same details', 'same style', 'same design', 'similar', 'like this', 'new version']):
+            recent = search_facts("vision")
+            vision_facts = [r for r in recent if r.get("topic", "").startswith("vision_scan") or r.get("topic") == "image_analysis"]
+            if vision_facts:
+                last_analysis = vision_facts[0]["info"][:300]
+                img_desc = f"{img_desc}, based on this reference: {last_analysis}"
+
         if not img_desc or len(img_desc) < 3:
             img_desc = 'modern product theme design'
 

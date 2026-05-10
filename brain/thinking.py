@@ -128,7 +128,9 @@ def classify_intent(text):
         return "query"
 
     # Theme generation
-    if re.search(r'generate\s+themes?\s+(?:for\s+)?', lower):
+    if re.search(r'(generate|create|make|build|produce)\s+(me\s+)?(examples?\s+)?(of\s+)?themes?\s+', lower):
+        return "generate_themes"
+    if 'themes for' in lower and any(w in lower for w in ['generate', 'create', 'make', 'yes', 'please']):
         return "generate_themes"
 
     # Pinterest / design inspiration requests

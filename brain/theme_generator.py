@@ -51,8 +51,18 @@ CATEGORIES = {
     "general": {"accent": "#4A90D9", "prompt": "Mixed merchandise products variety items on dark display table organized"},
 }
 
-# Quality suffix added to every prompt
-QUALITY_SUFFIX = ", dark moody background, professional product photography, cinematic lighting, high detail, modern 2026 style, 4k quality, portrait orientation"
+# Quality suffix — 80% bright modern, 20% dark moody
+# NO prices, NO discounts, NO brand names. Indonesian text for Indonesia market.
+QUALITY_SUFFIX_BRIGHT = ", fresh modern bright design, clean professional layout, vibrant colors, product clearly visible, high detail, modern 2026 style, 4k quality, portrait orientation, brand-neutral, NO prices NO discounts displayed, Indonesian language text Bahasa Indonesia, lifestyle product photography"
+QUALITY_SUFFIX_DARK = ", dark moody background, professional product photography, cinematic lighting, high detail, modern 2026 style, 4k quality, portrait orientation, NO prices NO discounts displayed, Indonesian language text Bahasa Indonesia"
+
+# Layout variations — rotate through all 4 types
+LAYOUT_TYPES = [
+    "products centered or slightly right, clean background",
+    "split layout with product image on right and Indonesian text on left side",
+    "hero header with Indonesian slogan at top like Koleksi Terbaru and product below",
+    "call to action layout with product and Indonesian CTA text like Belanja Sekarang",
+]
 
 
 def load_queue():
@@ -79,18 +89,14 @@ def generate_theme_image(category, variation=0, reject_comment=None):
     if reject_comment:
         base_prompt = f"{base_prompt}, {reject_comment}"
 
-    # Add variation
-    variations = [
-        "close up detail shot",
-        "wide angle arrangement",
-        "overhead flat lay view",
-        "side angle with bokeh background",
-        "dramatic low angle with shadows",
-    ]
-    if variation < len(variations):
-        base_prompt += f", {variations[variation]}"
+    # Rotate through layout types
+    layout = LAYOUT_TYPES[variation % len(LAYOUT_TYPES)]
+    base_prompt += f", {layout}"
 
-    full_prompt = base_prompt + QUALITY_SUFFIX
+    # 80% bright modern, 20% dark moody
+    import random as _rnd
+    suffix = QUALITY_SUFFIX_BRIGHT if _rnd.random() < 0.8 else QUALITY_SUFFIX_DARK
+    full_prompt = base_prompt + suffix
     seed = int(time.time()) + variation
 
     try:
@@ -98,10 +104,11 @@ def generate_theme_image(category, variation=0, reject_comment=None):
         url = f"https://image.pollinations.ai/prompt/{encoded}?width=480&height=854&nologo=true&seed={seed}"
 
         req = urllib.request.Request(url, headers={"User-Agent": "2B-AI/1.0"})
-        with urllib.request.urlopen(req, timeout=60) as resp:
+        # Pollinations can take 15-30 seconds to generate
+        with urllib.request.urlopen(req, timeout=90) as resp:
             img_data = resp.read()
 
-        if len(img_data) < 5000:
+        if len(img_data) < 1000:
             return None
 
         # Save locally first
@@ -137,7 +144,7 @@ def generate_batch(category, count=3, reject_comment=None):
         theme = generate_theme_image(category, variation=i, reject_comment=reject_comment)
         if theme:
             results.append(theme)
-        time.sleep(2)  # be nice to Pollinations
+        time.sleep(5)  # spacing between Pollinations requests to avoid rate limiting
     return results
 
 

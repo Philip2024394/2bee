@@ -53,8 +53,8 @@ CATEGORIES = {
 
 # Quality suffix — 80% bright modern, 20% dark moody
 # NO prices, NO discounts, NO brand names. Indonesian text for Indonesia market.
-QUALITY_SUFFIX_BRIGHT = ", fresh modern bright design, clean professional layout, vibrant colors, product clearly visible, high detail, modern 2026 style, 4k quality, portrait orientation, brand-neutral, NO prices NO discounts displayed, Indonesian language text Bahasa Indonesia, lifestyle product photography"
-QUALITY_SUFFIX_DARK = ", dark moody background, professional product photography, cinematic lighting, high detail, modern 2026 style, 4k quality, portrait orientation, NO prices NO discounts displayed, Indonesian language text Bahasa Indonesia"
+QUALITY_SUFFIX_BRIGHT = ", fresh modern bright design, clean professional layout, vibrant colors, product clearly visible, high detail, modern 2026 style, 4k quality, portrait 9:16, brand-neutral, NO prices NO discounts NO buttons NO UI elements, full complete image showing header area at top and footer area at bottom nothing cropped or cut off, Indonesian language text Bahasa Indonesia, lifestyle product photography"
+QUALITY_SUFFIX_DARK = ", dark moody background, professional product photography, cinematic lighting, high detail, modern 2026 style, 4k quality, portrait 9:16, NO prices NO discounts NO buttons NO UI elements, full complete image showing header area at top and footer area at bottom nothing cropped or cut off, Indonesian language text Bahasa Indonesia"
 
 # Layout variations — rotate through all 4 types
 LAYOUT_TYPES = [

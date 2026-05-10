@@ -222,7 +222,8 @@ def _chat_ollama(user_message, system_prompt, history=None):
         with urllib.request.urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             return result.get("message", {}).get("content", "").strip()
-    except Exception:
+    except Exception as e:
+        print(f"[LLM] Ollama failed: {e}")
         return None
 
 

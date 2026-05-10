@@ -32,12 +32,8 @@ VAULT_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "va
 # ======================================================================
 
 def derive_key(password, salt):
-    """Derive a 256-bit key from password using PBKDF2-like approach."""
-    # Multiple rounds of SHA-256 to slow down brute force
-    key = password.encode("utf-8") + salt
-    for _ in range(100000):
-        key = hashlib.sha256(key).digest()
-    return key
+    """Derive a 256-bit key from password using proper PBKDF2."""
+    return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 600000)
 
 
 def generate_keystream(key, length):

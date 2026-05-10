@@ -14,8 +14,8 @@ from datetime import datetime
 from brain.memory import add_fact, search_facts, get_db
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "theme_queue.json")
-SUPABASE_URL = "https://fjvafjkzvygkhiwjuvla.supabase.co"
-SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdmFmamt6dnlna2hpd2p1dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMDk0NDEsImV4cCI6MjA5MDY4NTQ0MX0.UoXfKznY9gAEqZDSTegDjIfYAeAeFg6Eh1D40Hoe2KM"
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://fjvafjkzvygkhiwjuvla.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdmFmamt6dnlna2hpd2p1dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMDk0NDEsImV4cCI6MjA5MDY4NTQ0MX0.UoXfKznY9gAEqZDSTegDjIfYAeAeFg6Eh1D40Hoe2KM")
 
 # Categories and their style prompts
 CATEGORIES = {

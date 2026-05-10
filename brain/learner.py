@@ -727,6 +727,14 @@ def scrape_url(url):
     Stores the content as verified facts for future questions.
     Returns a summary of what was learned."""
     try:
+        # SSRF protection — only allow http/https, block private IPs
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return None, "Only http/https URLs allowed."
+        hostname = parsed.hostname or ''
+        if hostname in ('localhost', '127.0.0.1', '0.0.0.0') or hostname.startswith('192.168.') or hostname.startswith('10.') or hostname.startswith('172.'):
+            return None, "Internal/private URLs not allowed."
+
         req = urllib.request.Request(url, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
             "Accept": "text/html,application/xhtml+xml",

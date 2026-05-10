@@ -13,10 +13,15 @@ Open: http://localhost:3000
 """
 
 import http.server
+import socketserver
 import json
 import os
 import sys
 import re
+import time
+import signal
+import threading
+from collections import defaultdict
 
 # Add project root to path
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -35,6 +40,27 @@ WEB_DIR = os.path.join(ROOT, "web")
 GITHUB_REMOTE = "https://github.com/Philip2024394/2bee.git"
 STREETLOCAL_ROOT = os.path.normpath(os.path.join(ROOT, "..", "streetlocal"))
 
+# Supabase credentials from environment (fallback to defaults for dev)
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://fjvafjkzvygkhiwjuvla.supabase.co")
+SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdmFmamt6dnlna2hpd2p1dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMDk0NDEsImV4cCI6MjA5MDY4NTQ0MX0.UoXfKznY9gAEqZDSTegDjIfYAeAeFg6Eh1D40Hoe2KM")
+
+# --- Rate Limiting ---
+_rate_limits = defaultdict(list)
+RATE_LIMIT = 60  # max requests per minute per IP
+def check_rate_limit(ip):
+    now = time.time()
+    _rate_limits[ip] = [t for t in _rate_limits[ip] if now - t < 60]
+    if len(_rate_limits[ip]) >= RATE_LIMIT:
+        return False
+    _rate_limits[ip].append(now)
+    return True
+
+
+# --- Multi-threaded HTTP Server ---
+class ThreadedHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
 
 class BeeHandler(http.server.SimpleHTTPRequestHandler):
     """Handles the web UI and all API endpoints."""
@@ -52,7 +78,25 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         return json.loads(self.rfile.read(length)) if length else {}
 
+    def _check_rate(self):
+        ip = self.client_address[0]
+        if not check_rate_limit(ip):
+            self.send_json({"error": "Rate limited. Try again in a minute."}, 429)
+            return False
+        return True
+
+    def _validate_path(self, rel_path):
+        """Validate file path is within StreetLocal project."""
+        if '\x00' in rel_path or '..' in rel_path:
+            return None
+        full = os.path.normpath(os.path.join(STREETLOCAL_ROOT, rel_path))
+        if not full.startswith(os.path.normpath(STREETLOCAL_ROOT)):
+            return None
+        return full
+
     def do_POST(self):
+        if not self._check_rate():
+            return
         if self.path == "/api/think":
             body = self.read_body()
             response = process(body.get("input", ""))
@@ -182,8 +226,8 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
                     supabase_url = None
                     try:
                         import urllib.request as urlreq
-                        sb_url = os.environ.get("SUPABASE_URL", "https://fjvafjkzvygkhiwjuvla.supabase.co")
-                        sb_key = os.environ.get("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdmFmamt6dnlna2hpd2p1dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMDk0NDEsImV4cCI6MjA5MDY4NTQ0MX0.UoXfKznY9gAEqZDSTegDjIfYAeAeFg6Eh1D40Hoe2KM")
+                        sb_url = SUPABASE_URL
+                        sb_key = SUPABASE_KEY
                         upload_path = f"2bee-refs/{local_name}"
                         req = urlreq.Request(
                             f"{sb_url}/storage/v1/object/assets/{upload_path}",
@@ -254,10 +298,12 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/files/git-push":
             body = self.read_body()
             message = body.get("message", "Update from 2B")
+            # Sanitize commit message — strip dangerous chars
+            message = re.sub(r'[^\w\s\-.,!?:;()/\'\"@#&+=]', '', message)[:200].strip() or "Update from 2B"
             import subprocess
             try:
                 subprocess.run(["git", "add", "-A"], cwd=STREETLOCAL_ROOT, capture_output=True)
-                result = subprocess.run(["git", "commit", "-m", message], cwd=STREETLOCAL_ROOT, capture_output=True, text=True)
+                result = subprocess.run(["git", "commit", "-m", "--", message], cwd=STREETLOCAL_ROOT, capture_output=True, text=True)
                 push = subprocess.run(["git", "push", "origin", "master"], cwd=STREETLOCAL_ROOT, capture_output=True, text=True)
                 self.send_json({
                     "success": push.returncode == 0,
@@ -422,6 +468,8 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
     def do_GET(self):
+        if self.path.startswith("/api/") and not self._check_rate():
+            return
         if self.path == "/api/stats":
             stats = get_stats()
             self.send_json(stats)
@@ -633,8 +681,19 @@ def main():
     learner.start()
     print(f"  Background learner: ON (Marketing, AI Apps, Video Creation — 30s cycles)")
 
-    # Marketing data collection deferred to learner background cycle
-    print(f"  Marketing collection: deferred to background learner")
+    # Warm up Ollama model in background (first call loads into GPU)
+    def _warmup_ollama():
+        try:
+            import urllib.request as urlreq
+            data = json.dumps({"model": "phi3:mini", "messages": [{"role": "user", "content": "hi"}], "stream": False, "options": {"num_predict": 5}}).encode("utf-8")
+            req = urlreq.Request("http://localhost:11434/api/chat", data=data, headers={"Content-Type": "application/json"}, method="POST")
+            with urlreq.urlopen(req, timeout=120) as resp:
+                resp.read()
+            print(f"  Ollama: model loaded and ready")
+        except Exception as e:
+            print(f"  Ollama: warmup skipped ({e})")
+    threading.Thread(target=_warmup_ollama, daemon=True).start()
+    print(f"  Ollama: warming up model...")
 
     # Vault status
     backups = vault.list_backups()
@@ -649,14 +708,21 @@ def main():
     print(f"  Press Ctrl+C to shut down")
     print()
 
-    # Start server
-    server = http.server.HTTPServer(("", PORT), BeeHandler)
+    # Start multi-threaded server
+    server = ThreadedHTTPServer(("", PORT), BeeHandler)
+
+    def cleanup(signum=None, frame=None):
+        print("\n  Shutting down...")
+        learner.stop()
+        print("  Learner stopped. Data saved in data/2bee.db")
+        server.server_close()
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, cleanup)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        learner.stop()
-        print("\n  Learner stopped. Data saved in data/2bee.db")
-        server.server_close()
+        cleanup()
 
 
 if __name__ == "__main__":

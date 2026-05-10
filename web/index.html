@@ -674,6 +674,8 @@ button:hover { background: #ffd700; color: #0a0a0f; }
         <option value="ideogram">🎨 Ideogram</option>
         <option value="pollinations">🎨 Pollinations</option>
     </select>
+    <button onclick="document.getElementById('chat-img-upload').click()" title="Upload image for 2B to see" style="background:#8E44AD;color:#fff;border:1px solid #8E44AD;padding:8px 10px;font-family:inherit;font-size:1em;border-radius:6px;cursor:pointer;">👁</button>
+    <input type="file" id="chat-img-upload" accept="image/*" style="display:none" onchange="uploadImageForVision(this.files)" />
     <input type="text" id="user-input" placeholder="Talk to 2B..." autofocus />
     <button id="send-btn">SEND</button>
 </div>
@@ -1683,6 +1685,73 @@ function cloneAndScreenshot() {
     addMessage('user', '📸 Preview + Clone: ' + url);
     cloneWebsite();
 }
+
+// --- Vision Upload ---
+let pendingVisionImage = null;
+
+function uploadImageForVision(files) {
+    if (!files || !files.length) return;
+    const file = files[0];
+    if (!file.type.startsWith('image/')) { addMessage('bee', 'Only image files.'); return; }
+
+    // Show the image in chat immediately
+    const url = URL.createObjectURL(file);
+    pendingVisionImage = file;
+
+    const chatEl = document.getElementById('chat');
+    const div = document.createElement('div');
+    div.className = 'msg user';
+    div.innerHTML = `
+        <div class="label">YOU</div>
+        <div style="margin:4px 0;border-radius:8px;overflow:hidden;max-width:300px;">
+            <img src="${url}" style="width:100%;display:block;" />
+        </div>
+        <div style="font-size:0.7em;color:#8a9aaa;margin-top:4px;">${file.name} — type a question about this image or just hit SEND</div>
+    `;
+    chatEl.appendChild(div);
+    chatEl.scrollTop = chatEl.scrollHeight;
+
+    // Focus input for question
+    document.getElementById('user-input').placeholder = 'What do you want to know about this image? (or just SEND)';
+    document.getElementById('user-input').focus();
+}
+
+// Override send to handle pending vision image
+const _origSendBeforeVision = send;
+send = async function(text) {
+    if (pendingVisionImage) {
+        const file = pendingVisionImage;
+        pendingVisionImage = null;
+        document.getElementById('user-input').placeholder = 'Talk to 2B...';
+
+        const question = text.trim() || 'Describe this image in detail. What do you see?';
+        addMessage('user', question);
+        addMessage('bee', '👁 Looking at your image...');
+        const chatEl = document.getElementById('chat');
+        const thinkingMsg = chatEl.lastChild;
+
+        // Upload to server for LLaVA analysis
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('question', question);
+
+        try {
+            const res = await fetch('/api/vision/upload', { method: 'POST', body: formData });
+            const data = await res.json();
+            if (data.analysis) {
+                thinkingMsg.innerHTML = `<div class="label">2B</div><div style="white-space:pre-wrap;">👁 ${data.analysis}</div>`;
+                speak('Here is what I see.');
+            } else {
+                thinkingMsg.innerHTML = `<div class="label">2B</div><div style="color:#ff4444;">${data.error || 'Vision failed. Is LLaVA model loaded?'}</div>`;
+            }
+        } catch(e) {
+            thinkingMsg.innerHTML = `<div class="label">2B</div><div style="color:#ff4444;">Vision error: ${e.message}</div>`;
+        }
+        chatEl.scrollTop = chatEl.scrollHeight;
+        return;
+    }
+    return _origSendBeforeVision(text);
+};
 
 // --- Theme Library ---
 async function openThemeLibrary() {

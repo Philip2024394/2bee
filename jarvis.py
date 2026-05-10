@@ -449,6 +449,47 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 self.send_json({"error": err or "Analysis failed"}, 500)
 
+        elif self.path == "/api/vision/upload":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                content_type = self.headers.get("Content-Type", "")
+                raw_data = self.rfile.read(content_length)
+
+                if "multipart/form-data" in content_type:
+                    boundary = content_type.split("boundary=")[1].encode()
+                    parts = raw_data.split(b"--" + boundary)
+                    img_data = None
+                    question = "Describe this image in detail."
+
+                    for part in parts:
+                        if b'name="question"' in part:
+                            question = part.split(b"\r\n\r\n")[1].strip().decode("utf-8", errors="ignore").strip("\r\n- ")
+                        elif b'name="file"' in part:
+                            header_end = part.find(b"\r\n\r\n")
+                            if header_end != -1:
+                                img_data = part[header_end + 4:].rstrip(b"\r\n--")
+
+                    if img_data and len(img_data) > 100:
+                        from brain.vision import analyze_image_bytes, is_available as vision_available
+                        if not vision_available():
+                            self.send_json({"error": "LLaVA not loaded. Run: ollama pull llava"})
+                            return
+                        result, err = analyze_image_bytes(img_data, question)
+                        if result:
+                            from brain.memory import add_fact, save_message
+                            save_message("user", f"[Uploaded image] {question}")
+                            save_message("2B", result[:500])
+                            add_fact("image_analysis", f"[Vision] {question}: {result[:300]}", source="verified")
+                            self.send_json({"analysis": result})
+                        else:
+                            self.send_json({"error": err or "Analysis failed"}, 500)
+                    else:
+                        self.send_json({"error": "No image data received"}, 400)
+                else:
+                    self.send_json({"error": "Expected multipart/form-data"}, 400)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         elif self.path == "/api/verify-saved":
             body = self.read_body()
             keywords = body.get("keywords", "")

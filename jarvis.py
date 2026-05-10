@@ -737,6 +737,19 @@ def main():
     except Exception as e:
         print(f"  Grammar knowledge: failed ({e})")
 
+    # Load foundational language knowledge (alphabet, words, sentences, communication)
+    try:
+        from brain.language_knowledge import load_all as load_language
+        l_before = get_stats()["facts"]
+        load_language()
+        l_loaded = get_stats()["facts"] - l_before
+        if l_loaded > 0:
+            print(f"  Language knowledge: loaded {l_loaded} new facts")
+        else:
+            print(f"  Language knowledge: already loaded")
+    except Exception as e:
+        print(f"  Language knowledge: failed ({e})")
+
     # Sync StreetLocal project data
     try:
         from brain.streetlocal_connector import sync_project_data, collect_marketing_data, get_all_image_urls

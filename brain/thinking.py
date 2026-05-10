@@ -774,7 +774,15 @@ def _lookup_grammar(subject):
     if not subject:
         return None
     word = subject.lower().strip().rstrip("?.").strip()
-    # Strip wrapper phrases that survived pattern extraction.
+    # Track whether the user explicitly said "letter X" so we can disambiguate
+    # single-character queries (e.g. "letter a" → letter A, not the article "a").
+    is_letter_query = False
+    for letter_prefix in ("the letter ", "letter "):
+        if word.startswith(letter_prefix):
+            is_letter_query = True
+            word = word[len(letter_prefix):].strip()
+            break
+    # Strip remaining wrapper phrases.
     for prefix in ("the word ", "the meaning of ", "meaning of ", "a ", "an ", "the "):
         if word.startswith(prefix):
             word = word[len(prefix):].strip()
@@ -785,12 +793,19 @@ def _lookup_grammar(subject):
     from brain.memory import get_db
     conn = get_db()
     rows = conn.execute(
-        "SELECT topic, info FROM facts WHERE topic = ? AND source = 'grammar_seed'",
+        "SELECT topic, info FROM facts WHERE topic = ? AND source IN ('grammar_seed', 'language_seed')",
         (word,),
     ).fetchall()
     conn.close()
     if not rows:
         return None
+    # If the user said "letter X" explicitly, only consider rows whose info starts
+    # with the letter as a heading (e.g. "A —" rather than "a — indefinite article").
+    if is_letter_query and len(word) == 1:
+        head_upper = word.upper()
+        for r in rows:
+            if r["info"].startswith(head_upper + " "):
+                return r["info"]
     # Prefer the row whose info starts with the queried word (the definition entry)
     # so "what is a pronoun" returns "pronoun — ..." not the first member of the category.
     head_word = word.replace("_", " ")
@@ -932,6 +947,14 @@ def handle_question(text):
     """Handle general questions."""
     lower = text.lower().strip()
     topics = extract_topic(text)
+
+    # Grammar/language lookup — covers "how do letters become words", "what's a vowel", etc.
+    # Try with the full topic phrase first, then with each topic word.
+    if topics:
+        full = " ".join(topics)
+        hit = _lookup_grammar(full) or _lookup_grammar(topics[0] if topics else "")
+        if hit:
+            return hit
 
     # PRIORITY: StreetLocal product questions answered from our knowledge
     sl_map = {'streetlocal': 'streetlocal', 'street local': 'streetlocal',

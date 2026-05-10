@@ -647,6 +647,7 @@ button:hover { background: #ffd700; color: #0a0a0f; }
     <button class="fab-btn" onclick="syncVault()" title="Sync to GitHub">🔄</button>
     <button class="fab-btn" id="img-btn" onclick="toggleImagePanel()" title="Image Studio">🎨</button>
     <button class="fab-btn" onclick="window.open('/editor.html','_blank')" title="Code Editor" style="background:#1f6feb;border-color:#1f6feb;">💻</button>
+    <button class="fab-btn" onclick="openThemeLibrary()" title="Theme Library" style="background:#E91E90;border-color:#E91E90;">🎭</button>
 </div>
 
 <div id="chat">
@@ -1525,6 +1526,97 @@ async function updateDashStats() {
         document.getElementById('dash-learning').style.color = lStats.running ? '#00ff88' : '#ff4444';
         document.getElementById('dash-db-size').textContent = `DB: ${lStats.db_size_mb} MB | ${lStats.capacity_pct}% capacity`;
     } catch(e) {}
+}
+
+// --- Theme Library ---
+async function openThemeLibrary() {
+    addMessage('bee', 'Loading theme library...');
+    try {
+        const res = await fetch('/api/themes/pending');
+        const data = await res.json();
+        const themes = data.themes || [];
+
+        if (themes.length === 0) {
+            addMessage('bee', 'No themes waiting for review. Want me to generate some?\n\nSay: "generate themes for clothing" or "generate themes for electronics"');
+            return;
+        }
+
+        addMessage('bee', `Theme Library: ${themes.length} themes pending review.\n\nReview each one below — 👍 Accept or 👎 Reject with feedback.`);
+
+        themes.forEach(theme => {
+            const chatEl = document.getElementById('chat');
+            const div = document.createElement('div');
+            div.className = 'msg bee';
+            div.id = 'theme-' + theme.id;
+            div.innerHTML = `
+                <div class="label">2B</div>
+                <div style="font-size:0.75em;color:#888;margin-bottom:4px;">${theme.category.toUpperCase()} — Accent: <span style="color:${theme.accent}">${theme.accent}</span></div>
+                <div style="margin:4px 0;border-radius:10px;overflow:hidden;border:1px solid #1a3a5c;max-width:300px;">
+                    <img src="/api/theme-image?path=${encodeURIComponent(theme.local_path)}" alt="${theme.category}" style="width:100%;display:block;" onerror="this.src='https://image.pollinations.ai/prompt/${encodeURIComponent(theme.prompt.substring(0,100))}?width=240&height=427&nologo=true'" />
+                </div>
+                <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                    <button onclick="acceptTheme('${theme.id}')" style="background:#00ff88;color:#0a0a0f;border:none;border-radius:6px;padding:6px 14px;font-size:0.8em;cursor:pointer;font-weight:700;">✅ Accept — Go Live</button>
+                    <button onclick="rejectThemePrompt('${theme.id}','${theme.category}')" style="background:#ff4444;color:#fff;border:none;border-radius:6px;padding:6px 14px;font-size:0.8em;cursor:pointer;">❌ Reject</button>
+                </div>
+            `;
+            chatEl.appendChild(div);
+        });
+        const chatEl = document.getElementById('chat');
+        chatEl.scrollTop = chatEl.scrollHeight;
+
+    } catch (e) {
+        addMessage('bee', 'Error loading themes: ' + e.message);
+    }
+}
+
+async function acceptTheme(id) {
+    const div = document.getElementById('theme-' + id);
+    if (div) {
+        const btns = div.querySelectorAll('button');
+        btns.forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+    }
+    try {
+        const res = await fetch('/api/themes/accept', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ id })
+        });
+        const data = await res.json();
+        if (data.success) {
+            addMessage('bee', `✅ Theme accepted and LIVE!\nCategory: ${data.category}\nAccent: ${data.accent}\nURL: ${data.url}`);
+            speak('Theme accepted and live.');
+        } else {
+            addMessage('bee', '❌ Accept failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        addMessage('bee', '❌ Error: ' + e.message);
+    }
+}
+
+function rejectThemePrompt(id, category) {
+    const comment = prompt(`What's wrong with this ${category} theme?\n\nExamples:\n- too bright, needs darker background\n- products not centered\n- wrong style, needs modern look\n- colors dont match category`);
+    if (comment === null) return;
+    rejectTheme(id, comment || 'not good enough');
+}
+
+async function rejectTheme(id, comment) {
+    const div = document.getElementById('theme-' + id);
+    if (div) {
+        const btns = div.querySelectorAll('button');
+        btns.forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+    }
+    try {
+        const res = await fetch('/api/themes/reject', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ id, comment })
+        });
+        const data = await res.json();
+        if (data.success) {
+            addMessage('bee', `❌ Theme rejected. Feedback noted: "${comment}"\n\n2B is regenerating ${data.regenerated} new versions with your feedback applied. Check the library again in a minute.`);
+            speak('Theme rejected. Regenerating with your feedback.');
+        }
+    } catch (e) {
+        addMessage('bee', '❌ Error: ' + e.message);
+    }
 }
 
 // --- File Upload ---

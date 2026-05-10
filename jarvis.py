@@ -320,6 +320,36 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
 
+        elif self.path == "/api/themes/generate":
+            body = self.read_body()
+            category = body.get("category", "")
+            from brain.theme_generator import generate_batch, load_queue, save_queue
+            if category:
+                themes = generate_batch(category, count=body.get("count", 3))
+                queue = load_queue()
+                for t in themes:
+                    queue["pending"].append(t)
+                    queue["stats"]["generated"] += 1
+                save_queue(queue)
+                self.send_json({"generated": len(themes), "category": category})
+            else:
+                # Auto-check all categories
+                from brain.theme_generator import auto_generate_check
+                count = auto_generate_check()
+                self.send_json({"generated": count})
+
+        elif self.path == "/api/themes/accept":
+            body = self.read_body()
+            from brain.theme_generator import accept_theme
+            result = accept_theme(body.get("id", ""))
+            self.send_json(result)
+
+        elif self.path == "/api/themes/reject":
+            body = self.read_body()
+            from brain.theme_generator import reject_theme
+            result = reject_theme(body.get("id", ""), body.get("comment", ""))
+            self.send_json(result)
+
         elif self.path == "/api/verify-saved":
             body = self.read_body()
             keywords = body.get("keywords", "")
@@ -375,6 +405,15 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
 
         elif self.path == "/api/llm/status":
             self.send_json(llm.get_status())
+
+        # --- THEME LIBRARY ---
+        elif self.path == "/api/themes/pending":
+            from brain.theme_generator import get_pending
+            self.send_json({"themes": get_pending()})
+
+        elif self.path == "/api/themes/stats":
+            from brain.theme_generator import get_stats as theme_stats
+            self.send_json(theme_stats())
 
         # --- FILE SYSTEM API (StreetLocal project) ---
         elif self.path.startswith("/api/files/tree"):
@@ -439,6 +478,22 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
                 self.send_json({"files": files, "clean": len(files) == 0})
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
+
+        # Serve theme candidate images
+        elif self.path.startswith("/api/theme-image"):
+            import urllib.parse
+            query = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(query)
+            img_path = params.get("path", [""])[0]
+            if os.path.exists(img_path) and img_path.endswith(('.png', '.jpg', '.jpeg')):
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.end_headers()
+                with open(img_path, "rb") as f:
+                    self.wfile.write(f.read())
+            else:
+                self.send_response(404)
+                self.end_headers()
 
         # Serve Monaco editor files
         elif self.path.startswith("/monaco/"):
@@ -542,18 +597,8 @@ def main():
     learner.start()
     print(f"  Background learner: ON (Marketing, AI Apps, Video Creation — 30s cycles)")
 
-    # Start marketing data collection in background
-    import threading
-    def _collect_marketing():
-        try:
-            from brain.streetlocal_connector import collect_marketing_data
-            import time
-            time.sleep(10)  # let system settle
-            scraped = collect_marketing_data()
-            print(f"  [Marketing] Collected {scraped} marketing/launch strategy pages")
-        except Exception as e:
-            print(f"  [Marketing] Collection failed: {e}")
-    threading.Thread(target=_collect_marketing, daemon=True).start()
+    # Marketing data collection deferred to learner background cycle
+    print(f"  Marketing collection: deferred to background learner")
 
     # Vault status
     backups = vault.list_backups()

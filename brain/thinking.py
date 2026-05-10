@@ -127,6 +127,10 @@ def classify_intent(text):
             "current events", "headlines", "trending news")):
         return "query"
 
+    # Theme generation
+    if re.search(r'generate\s+themes?\s+(?:for\s+)?', lower):
+        return "generate_themes"
+
     # Pinterest / design inspiration requests
     if any(x in lower for x in ("pinterest", "design inspiration", "ui inspiration",
             "layout ideas", "color palette", "design elements", "ui design for",
@@ -1113,6 +1117,22 @@ def process(user_input):
                 response = f"No matches found for '{pattern}' in the codebase."
         else:
             response = "What should I search for? Example: 'search code for THEME_PRESETS'"
+    elif intent == "generate_themes":
+        # Extract category
+        cat_match = re.search(r'themes?\s+(?:for\s+)?(\w+)', text.lower())
+        category = cat_match.group(1) if cat_match else 'general'
+        category = category.replace(' ', '_')
+        try:
+            from brain.theme_generator import generate_batch, load_queue, save_queue
+            themes = generate_batch(category, count=3)
+            queue = load_queue()
+            for t in themes:
+                queue["pending"].append(t)
+                queue["stats"]["generated"] += 1
+            save_queue(queue)
+            response = f"Generated {len(themes)} theme candidates for '{category}'. Click the 🎭 Theme Library button to review them — accept or reject each one."
+        except Exception as e:
+            response = f"Theme generation failed: {str(e)}"
     elif intent == "scrape_url":
         # Extract URL from the message
         url_match = re.search(r'(https?://\S+)', text)

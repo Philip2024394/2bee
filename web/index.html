@@ -1603,35 +1603,67 @@ async function cloneWebsite() {
     }
 
     addMessage('user', '🌐 Clone: ' + url);
-    addMessage('bee', 'Scraping and analyzing ' + url + '...');
 
+    const chatEl = document.getElementById('chat');
+
+    // Show live preview iframe in chat
+    const previewDiv = document.createElement('div');
+    previewDiv.className = 'msg bee';
+    previewDiv.innerHTML = `
+        <div class="label">2B</div>
+        <div style="font-size:0.75em;color:#ffd700;margin-bottom:6px;">🌐 Live Preview — ${url}</div>
+        <div style="border-radius:10px;overflow:hidden;border:1px solid #1a3a5c;max-width:480px;background:#000;">
+            <div style="display:flex;align-items:center;padding:4px 8px;background:#2d2d2d;gap:6px;">
+                <button onclick="this.parentElement.nextElementSibling.style.height='854px';this.parentElement.nextElementSibling.style.width='480px'" style="background:#3e3e3e;border:none;color:#d4d4d4;padding:2px 8px;border-radius:4px;font-size:0.7em;cursor:pointer;">📱</button>
+                <button onclick="this.parentElement.nextElementSibling.style.height='600px';this.parentElement.nextElementSibling.style.width='100%'" style="background:#3e3e3e;border:none;color:#d4d4d4;padding:2px 8px;border-radius:4px;font-size:0.7em;cursor:pointer;">🖥</button>
+                <span style="flex:1;font-size:0.6em;color:#888;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${url}</span>
+                <button onclick="window.open('${url}','_blank')" style="background:#3e3e3e;border:none;color:#d4d4d4;padding:2px 8px;border-radius:4px;font-size:0.7em;cursor:pointer;">↗</button>
+            </div>
+            <iframe src="${url}" style="width:480px;height:854px;border:none;display:block;" sandbox="allow-scripts allow-same-origin allow-popups"></iframe>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+            <button onclick="openInEditor('${url}')" style="background:#1f6feb;color:#fff;border:none;border-radius:6px;padding:6px 12px;font-size:0.75em;cursor:pointer;">💻 Open in Editor</button>
+            <button onclick="analyzeClone('${url}')" style="background:#ffd700;color:#0a0a0f;border:none;border-radius:6px;padding:6px 12px;font-size:0.75em;cursor:pointer;">🔍 Analyze & Learn</button>
+        </div>
+    `;
+    chatEl.appendChild(previewDiv);
+    chatEl.scrollTop = chatEl.scrollHeight;
+
+    urlInput.value = '';
+}
+
+function openInEditor(url) {
+    // Open editor with the URL loaded in preview panel
+    const editorUrl = '/editor.html#preview=' + encodeURIComponent(url);
+    window.open(editorUrl, '_blank');
+    addMessage('bee', 'Opened in Code Editor. The preview panel will show the cloned site.');
+}
+
+async function analyzeClone(url) {
+    addMessage('bee', 'Analyzing and scraping ' + url + '...');
     try {
-        // Scrape the website via 2B's scraper
         const res = await fetch('/api/scrape', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ url })
         });
         const data = await res.json();
-
         if (data.summary) {
             let response = '✅ ' + data.summary;
             if (data.links && data.links.length > 0) {
-                response += '\n\nLinks found:';
+                response += '\n\nKey pages found:';
                 data.links.slice(0, 5).forEach(link => {
                     response += '\n🔗 ' + link;
                 });
             }
-            response += '\n\nWebsite content stored in my memory. Ask me anything about it.';
+            response += '\n\nAll content stored. Ask me about their layout, features, or design.';
             addMessage('bee', response);
         } else {
-            addMessage('bee', '❌ Could not scrape: ' + (data.error || 'Unknown error'));
+            addMessage('bee', '❌ Could not analyze: ' + (data.error || 'Unknown error'));
         }
     } catch (e) {
-        addMessage('bee', '❌ Clone failed: ' + e.message);
+        addMessage('bee', '❌ Analysis failed: ' + e.message);
     }
-
-    urlInput.value = '';
 }
 
 function cloneAndScreenshot() {
@@ -1641,16 +1673,8 @@ function cloneAndScreenshot() {
         addMessage('bee', 'Please enter a valid URL starting with https://');
         return;
     }
-
-    // Open the URL in the editor preview
-    addMessage('user', '📸 Preview: ' + url);
-    addMessage('bee', 'Opening in preview. You can also view it in the Code Editor preview panel.');
-
-    // Also scrape it
+    addMessage('user', '📸 Preview + Clone: ' + url);
     cloneWebsite();
-
-    // Open in new tab for visual reference
-    window.open(url, '_blank');
 }
 
 // --- Theme Library ---

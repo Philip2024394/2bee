@@ -596,9 +596,22 @@ Rules: Give DIRECT specific answers. Use bullet points. Show exact code when rel
     chat.scrollTop = chat.scrollHeight;
 }
 
-// Welcome message
+// Check for clone preview URL in hash
 setTimeout(() => {
-    addChatMsg('2b', 'Editor ready. Powered by Claude, GPT & Gemini — free.\n\nCommands:\n• "open foodlocal" — open a file\n• "preview" — see app in iPhone frame\n• "save" / "push to github"\n\nOr ask me anything — I can read your code, explain it, fix bugs, add features, and write new components.\n\nSelect AI model below ↓');
+    const hash = window.location.hash;
+    if (hash.startsWith('#preview=')) {
+        const cloneUrl = decodeURIComponent(hash.substring(9));
+        if (cloneUrl) {
+            const p = document.getElementById('preview');
+            p.classList.add('open');
+            document.getElementById('preview-frame').src = cloneUrl;
+            document.getElementById('pv-size').textContent = cloneUrl.substring(0, 30) + '...';
+            editor.layout();
+            addChatMsg('2b', 'Cloned site loaded in preview panel.\nURL: ' + cloneUrl + '\n\nYou can switch between 📱 phone and 🖥 desktop views.');
+        }
+    } else {
+        addChatMsg('2b', 'Editor ready.\n\nCommands: "open foodlocal", "preview", "save", "push to github"\nOr ask me anything about the code.');
+    }
 }, 500);
 </script>
 <script src="https://js.puter.com/v2/"></script>

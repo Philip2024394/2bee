@@ -267,6 +267,59 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
 
+        elif self.path == "/api/ai-chat":
+            body = self.read_body()
+            prompt = body.get("prompt", "")
+            user_msg = body.get("user_message", "")
+            if not prompt:
+                self.send_json({"error": "Prompt required"}, 400)
+                return
+            try:
+                import urllib.request as urlreq
+                import urllib.parse
+                encoded = urllib.parse.quote(prompt[:4000])
+                url = f"https://text.pollinations.ai/{encoded}?model=openai"
+                req = urlreq.Request(url, headers={"User-Agent": "2B-AI/1.0"})
+                with urlreq.urlopen(req, timeout=30) as resp:
+                    reply = resp.read().decode("utf-8", errors="ignore").strip()
+
+                    # --- LEARN FROM EVERY EXCHANGE ---
+                    from brain.memory import save_message, add_fact
+                    import re as _re
+
+                    # Save conversation
+                    if user_msg:
+                        save_message("user", user_msg)
+                    save_message("2B", reply[:500])
+
+                    # Extract and store any URLs from the AI response
+                    urls = _re.findall(r'https?://[^\s<>"\')\]]+', reply)
+                    for u in urls[:5]:
+                        add_fact("ai_suggested_link", f"AI suggested: {u}", source="verified")
+
+                    # Store code knowledge — if reply contains code patterns
+                    if user_msg and len(reply) > 50:
+                        # Store as coding knowledge
+                        topic = "code_knowledge"
+                        if any(w in user_msg.lower() for w in ['feature', 'what is', 'what are', 'how does', 'explain']):
+                            topic = "project_knowledge"
+                        elif any(w in user_msg.lower() for w in ['fix', 'bug', 'error', 'wrong']):
+                            topic = "bug_fix"
+                        elif any(w in user_msg.lower() for w in ['add', 'create', 'build', 'make', 'new']):
+                            topic = "code_pattern"
+                        elif any(w in user_msg.lower() for w in ['dont', "don't", 'stop', 'never', 'remove', 'delete']):
+                            topic = "preference_negative"
+                        elif any(w in user_msg.lower() for w in ['yes', 'good', 'perfect', 'great', 'keep', 'like']):
+                            topic = "preference_positive"
+
+                        # Store condensed Q&A as fact
+                        qa = f"Q: {user_msg[:100]} → A: {reply[:200]}"
+                        add_fact(topic, qa, source="user_taught")
+
+                    self.send_json({"reply": reply})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         elif self.path == "/api/verify-saved":
             body = self.read_body()
             keywords = body.get("keywords", "")

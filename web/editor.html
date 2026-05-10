@@ -49,9 +49,11 @@ body { background: #1e1e1e; color: #d4d4d4; font-family: 'Consolas','Courier New
 #editor-container { flex:1; }
 
 /* Preview */
-#preview { width:0; border-left:1px solid #3e3e3e; transition:width 0.2s; overflow:hidden; background:#fff; }
+#preview { width:0; border-left:1px solid #3e3e3e; transition:width 0.3s; overflow:hidden; background:#1a1a1a; display:flex; flex-direction:column; }
 #preview.open { width:45%; }
-#preview iframe { width:100%; height:100%; border:none; }
+.pv-btn { background:#3e3e3e; border:none; color:#d4d4d4; width:30px; height:26px; border-radius:4px; cursor:pointer; font-size:0.9em; display:flex; align-items:center; justify-content:center; }
+.pv-btn:hover { background:#505050; }
+.pv-btn.active { background:#ffd700; color:#1e1e1e; }
 
 /* Status Bar */
 #statusbar { display:flex; padding:2px 10px; background:#007acc; color:#fff; font-size:0.65em; gap:12px; align-items:center; flex-shrink:0; }
@@ -94,11 +96,62 @@ body { background: #1e1e1e; color: #d4d4d4; font-family: 'Consolas','Courier New
         <div id="editor-container"></div>
     </div>
 
-    <!-- Live Preview -->
+    <!-- 2B Chat Panel -->
+    <div id="chat-panel" style="width:300px;background:#0d1117;border-left:1px solid #3e3e3e;display:flex;flex-direction:column;flex-shrink:0;">
+        <div style="padding:8px 10px;border-bottom:1px solid #3e3e3e;display:flex;align-items:center;justify-content:space-between;">
+            <span style="color:#ffd700;font-weight:900;font-size:0.8em;letter-spacing:2px;">2B</span>
+            <span style="color:#555;font-size:0.6em;">AI Assistant</span>
+        </div>
+        <div id="editor-chat" style="flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px;"></div>
+        <div style="padding:4px 8px;border-top:1px solid #3e3e3e;">
+            <select id="chat-model" style="width:100%;background:#1e1e1e;border:1px solid #3e3e3e;color:#ffd700;padding:4px 8px;font-family:inherit;font-size:0.65em;border-radius:4px;outline:none;margin-bottom:4px;cursor:pointer;">
+                <option value="claude-3-5-sonnet">Claude Sonnet (Best for code)</option>
+                <option value="gpt-4o">GPT-4o</option>
+                <option value="gemini-2.0-flash">Gemini Flash</option>
+                <option value="deepseek-chat">DeepSeek</option>
+                <option value="fallback">2B Brain (offline)</option>
+            </select>
+            <div style="display:flex;gap:4px;">
+                <input type="text" id="ai-input" placeholder="Ask anything..." style="flex:1;background:#1e1e1e;border:1px solid #3e3e3e;color:#d4d4d4;padding:8px 10px;font-family:inherit;font-size:0.8em;border-radius:6px;outline:none;" onkeydown="if(event.key==='Enter')askAI()" />
+                <button onclick="askAI()" style="background:#ffd700;border:none;color:#1e1e1e;padding:6px 12px;border-radius:6px;font-family:inherit;font-size:0.75em;font-weight:700;cursor:pointer;">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Live Preview Panel -->
     <div id="preview">
-        <iframe id="preview-frame" src="about:blank"></iframe>
+        <!-- Preview Controls -->
+        <div id="preview-controls" style="display:flex;align-items:center;padding:4px 8px;background:#2d2d2d;border-bottom:1px solid #3e3e3e;gap:4px;flex-shrink:0;">
+            <button class="pv-btn active" onclick="setPreviewMode('phone')" id="pv-phone" title="iPhone">📱</button>
+            <button class="pv-btn" onclick="setPreviewMode('tablet')" id="pv-tablet" title="Tablet">📋</button>
+            <button class="pv-btn" onclick="setPreviewMode('desktop')" id="pv-desktop" title="Desktop">🖥</button>
+            <span style="flex:1"></span>
+            <span id="pv-size" style="font-size:0.6em;color:#888;">390×844</span>
+            <button class="pv-btn" onclick="refreshPreview()" title="Refresh">↻</button>
+        </div>
+        <!-- Preview Container -->
+        <div id="preview-container" style="flex:1;display:flex;align-items:center;justify-content:center;background:#1a1a1a;overflow:auto;padding:12px;">
+            <!-- iPhone Frame -->
+            <div id="phone-frame" style="width:390px;height:844px;border-radius:44px;background:#1a1a1a;padding:3px;position:relative;box-shadow:0 20px 60px rgba(0,0,0,0.5);border:2px solid #333;flex-shrink:0;">
+                <!-- Side button -->
+                <div style="position:absolute;right:-3px;top:120px;width:3px;height:40px;border-radius:0 2px 2px 0;background:#333;"></div>
+                <!-- Volume buttons -->
+                <div style="position:absolute;left:-3px;top:100px;width:3px;height:24px;border-radius:2px 0 0 2px;background:#333;"></div>
+                <div style="position:absolute;left:-3px;top:132px;width:3px;height:24px;border-radius:2px 0 0 2px;background:#333;"></div>
+                <!-- Screen -->
+                <div style="width:100%;height:100%;border-radius:40px;overflow:hidden;position:relative;background:#000;">
+                    <!-- Dynamic Island -->
+                    <div style="position:absolute;top:10px;left:50%;transform:translateX(-50%);width:72px;height:22px;background:#000;border-radius:16px;z-index:10;"></div>
+                    <!-- Iframe -->
+                    <iframe id="preview-frame" src="about:blank" style="width:100%;height:100%;border:none;"></iframe>
+                    <!-- Home Indicator -->
+                    <div style="position:absolute;bottom:6px;left:50%;transform:translateX(-50%);width:80px;height:4px;border-radius:2px;background:rgba(255,255,255,0.3);z-index:10;"></div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
+
 
 <!-- Status Bar -->
 <div id="statusbar">
@@ -369,6 +422,225 @@ function setStatus(msg) {
 
 // Resize handler
 window.addEventListener('resize', () => { if (editor) editor.layout(); });
+
+// ===== PREVIEW MODES =====
+function setPreviewMode(mode) {
+    const frame = document.getElementById('phone-frame');
+    const container = document.getElementById('preview-container');
+    const sizeLabel = document.getElementById('pv-size');
+
+    // Update active button
+    document.querySelectorAll('.pv-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('pv-' + mode)?.classList.add('active');
+
+    if (mode === 'phone') {
+        frame.style.width = '390px';
+        frame.style.height = '844px';
+        frame.style.borderRadius = '44px';
+        frame.style.padding = '3px';
+        frame.style.border = '2px solid #333';
+        frame.style.boxShadow = '0 20px 60px rgba(0,0,0,0.5)';
+        frame.querySelector('div:last-child').style.borderRadius = '40px';
+        // Show dynamic island + home indicator
+        frame.querySelectorAll('div').forEach((d, i) => { if (i < 4) d.style.display = 'block'; });
+        sizeLabel.textContent = '390×844';
+        container.style.padding = '12px';
+    } else if (mode === 'tablet') {
+        frame.style.width = '768px';
+        frame.style.height = '1024px';
+        frame.style.borderRadius = '20px';
+        frame.style.padding = '2px';
+        frame.style.border = '2px solid #333';
+        frame.style.boxShadow = '0 10px 40px rgba(0,0,0,0.4)';
+        frame.querySelector('div:last-child').style.borderRadius = '18px';
+        // Hide phone-specific elements
+        frame.querySelectorAll('div').forEach((d, i) => { if (i > 0 && i < 4) d.style.display = 'none'; });
+        sizeLabel.textContent = '768×1024';
+        container.style.padding = '8px';
+    } else {
+        // Desktop — full width, no frame
+        frame.style.width = '100%';
+        frame.style.height = '100%';
+        frame.style.borderRadius = '0';
+        frame.style.padding = '0';
+        frame.style.border = 'none';
+        frame.style.boxShadow = 'none';
+        frame.querySelector('div:last-child').style.borderRadius = '0';
+        frame.querySelectorAll('div').forEach((d, i) => { if (i > 0 && i < 4) d.style.display = 'none'; });
+        sizeLabel.textContent = 'Full width';
+        container.style.padding = '0';
+    }
+}
+
+function refreshPreview() {
+    const iframe = document.getElementById('preview-frame');
+    if (iframe.src !== 'about:blank') iframe.src = iframe.src;
+}
+
+// ===== 2B CHAT IN EDITOR =====
+function addChatMsg(role, text) {
+    const chat = document.getElementById('editor-chat');
+    const div = document.createElement('div');
+    div.style.cssText = role === 'user'
+        ? 'align-self:flex-end;background:#1f3a5c;color:#e0e8f0;padding:6px 10px;border-radius:10px 10px 2px 10px;font-size:0.8em;max-width:90%;word-wrap:break-word;'
+        : 'align-self:flex-start;background:#1a1a2e;color:#ffd700;padding:6px 10px;border-radius:10px 10px 10px 2px;font-size:0.8em;max-width:90%;word-wrap:break-word;white-space:pre-wrap;border:1px solid #2a2a4e;';
+    div.textContent = text;
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+}
+
+// Editor-aware commands
+function handleEditorCommand(text) {
+    const lower = text.toLowerCase().trim();
+
+    // Open file
+    if (lower.startsWith('open ')) {
+        const filename = text.substring(5).trim();
+        // Search for file in tree
+        const match = findFileInProject(filename);
+        if (match) { openFile(match); return `Opening ${match}`; }
+        return `File "${filename}" not found. Try the full path like food-basic/src/App.jsx`;
+    }
+
+    // Preview
+    if (lower.includes('preview') || lower.includes('show app') || lower.includes('show project') || lower.includes('screen view')) {
+        togglePreview();
+        return 'Preview opened. Use 📱 📋 🖥 buttons to switch between iPhone, tablet, and desktop views.';
+    }
+
+    // Save
+    if (lower === 'save' || lower === 'save file') {
+        saveFile();
+        return 'File saved.';
+    }
+
+    // Git
+    if (lower.includes('push') || lower.includes('git push')) {
+        gitPush();
+        return 'Opening git push dialog...';
+    }
+    if (lower.includes('git status')) {
+        gitStatus();
+        return 'Checking git status...';
+    }
+
+    return null; // Not an editor command, pass to 2B brain
+}
+
+function findFileInProject(name) {
+    // Search open files first
+    const keys = Object.keys(openFiles);
+    const match = keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
+    if (match) return match;
+    // Common shortcuts
+    const shortcuts = {
+        'app': 'food-basic/src/App.jsx',
+        'app.jsx': 'food-basic/src/App.jsx',
+        'foodlocal': 'food-basic/src/App.jsx',
+        'products': 'products-local/src/App.jsx',
+        'productslocal': 'products-local/src/App.jsx',
+        'landing': 'landing/src/App.jsx',
+        'foodpro': 'food-pro/src/App.jsx',
+        'property': 'property-agent/src/App.jsx',
+    };
+    for (const [key, path] of Object.entries(shortcuts)) {
+        if (name.toLowerCase().includes(key)) return path;
+    }
+    return null;
+}
+
+// Chat history for context
+let chatHistory = [];
+
+async function askAI() {
+    const input = document.getElementById('ai-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+
+    addChatMsg('user', text);
+
+    // Try editor commands first
+    const cmdResult = handleEditorCommand(text);
+    if (cmdResult) {
+        addChatMsg('2b', cmdResult);
+        return;
+    }
+
+    // Add thinking indicator
+    addChatMsg('2b', '...');
+    const chat = document.getElementById('editor-chat');
+    const thinkingMsg = chat.lastChild;
+
+    // Build context about current file
+    let fileContext = '';
+    if (activeFile) {
+        const code = openFiles[activeFile]?.model?.getValue() || '';
+        const selection = editor.getModel()?.getValueInRange(editor.getSelection()) || '';
+        if (selection) {
+            fileContext = `\n\nCurrently editing: ${activeFile}\nSelected code:\n\`\`\`\n${selection.substring(0, 1000)}\n\`\`\``;
+        } else if (code.length < 3000) {
+            fileContext = `\n\nCurrently editing: ${activeFile}\nFull file:\n\`\`\`\n${code}\n\`\`\``;
+        } else {
+            fileContext = `\n\nCurrently editing: ${activeFile} (${(code.length/1024).toFixed(0)}KB, ${code.split('\n').length} lines)`;
+        }
+    }
+
+    // Build full prompt with project knowledge
+    const systemPrompt = `You are 2B, an expert AI coding assistant for the StreetLocal project.
+
+StreetLocal apps:
+- FoodLocal (Rp 35,000/month): WhatsApp ordering (zero commission), digital menu with photos, promo pricing, halal badges, spice indicators, 24 theme backgrounds, custom logo & branding, GPS delivery with GoJek/Grab rates, 16 country support, shop open/close toggle, per-day hours, QR code generator, QRIS payment, daily deals, Instagram/TikTok bio links, auto SEO, PWA mobile-first, 2 languages
+- ProductsLocal (Rp 35,000/month): Same features as FoodLocal but for any product category. 31 themes including clothing, electronics, beauty, home, automotive. Product catalog, stock toggle, variants
+- Food Pro (Rp 100,000/month): Premium restaurant app with seating, live entertainment, events, outside catering, daily deals, promo campaigns
+- Domain services: 3 tiers (Rp 25k-150k/month)
+- Tech: React 19, Vite, Supabase, PWA, inline CSS, dark theme, glass morphism, 480px mobile-first
+
+Rules: Give DIRECT specific answers. Use bullet points. Show exact code when relevant. Never say "I cannot".`;
+
+    const fullPrompt = systemPrompt + '\n\nUser: ' + text + fileContext + '\n\n2B:';
+
+    // AI CHAT — via server proxy (anonymous, always works)
+    try {
+        const res = await fetch('/api/ai-chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: fullPrompt, user_message: text })
+        });
+        const data = await res.json();
+        if (data.reply && data.reply.length > 2) {
+            chatHistory.push({ role: 'user', content: text });
+            chatHistory.push({ role: 'assistant', content: data.reply });
+            thinkingMsg.textContent = data.reply;
+            thinkingMsg.style.whiteSpace = 'pre-wrap';
+            chat.scrollTop = chat.scrollHeight;
+            return;
+        }
+        if (data.error) throw new Error(data.error);
+    } catch (e) {
+        console.log('Server AI failed:', e);
+        thinkingMsg.textContent = 'AI request failed: ' + e.message + '. Retrying...';
+        // Retry once
+        try {
+            const res2 = await fetch('/api/think', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ input: text + fileContext })
+            });
+            const data2 = await res2.json();
+            thinkingMsg.textContent = data2.response;
+        } catch (e2) {
+            thinkingMsg.textContent = 'Connection failed. Check internet.';
+        }
+    }
+    chat.scrollTop = chat.scrollHeight;
+}
+
+// Welcome message
+setTimeout(() => {
+    addChatMsg('2b', 'Editor ready. Powered by Claude, GPT & Gemini — free.\n\nCommands:\n• "open foodlocal" — open a file\n• "preview" — see app in iPhone frame\n• "save" / "push to github"\n\nOr ask me anything — I can read your code, explain it, fix bugs, add features, and write new components.\n\nSelect AI model below ↓');
+}, 500);
 </script>
+<script src="https://js.puter.com/v2/"></script>
 </body>
 </html>

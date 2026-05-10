@@ -33,6 +33,7 @@ WEB_DIR = os.path.join(ROOT, "web")
 
 # GitHub remote for encrypted vault backups
 GITHUB_REMOTE = "https://github.com/Philip2024394/2bee.git"
+STREETLOCAL_ROOT = os.path.normpath(os.path.join(ROOT, "..", "streetlocal"))
 
 
 class BeeHandler(http.server.SimpleHTTPRequestHandler):
@@ -232,6 +233,40 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
                 print(f"[Upload] Error: {e}")
                 self.send_json({"error": str(e)}, 500)
 
+        elif self.path == "/api/files/write":
+            body = self.read_body()
+            rel_path = body.get("path", "")
+            content = body.get("content", "")
+            if not rel_path:
+                self.send_json({"error": "Path required"}, 400)
+                return
+            full = os.path.normpath(os.path.join(STREETLOCAL_ROOT, rel_path))
+            if not full.startswith(os.path.normpath(STREETLOCAL_ROOT)):
+                self.send_json({"error": "Access denied"}, 403)
+                return
+            try:
+                with open(full, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(content)
+                self.send_json({"success": True, "path": rel_path, "size": len(content)})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/files/git-push":
+            body = self.read_body()
+            message = body.get("message", "Update from 2B")
+            import subprocess
+            try:
+                subprocess.run(["git", "add", "-A"], cwd=STREETLOCAL_ROOT, capture_output=True)
+                result = subprocess.run(["git", "commit", "-m", message], cwd=STREETLOCAL_ROOT, capture_output=True, text=True)
+                push = subprocess.run(["git", "push", "origin", "master"], cwd=STREETLOCAL_ROOT, capture_output=True, text=True)
+                self.send_json({
+                    "success": push.returncode == 0,
+                    "commit": result.stdout.strip()[:200],
+                    "push": push.stdout.strip()[:200] or push.stderr.strip()[:200],
+                })
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         elif self.path == "/api/verify-saved":
             body = self.read_body()
             keywords = body.get("keywords", "")
@@ -287,6 +322,86 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
 
         elif self.path == "/api/llm/status":
             self.send_json(llm.get_status())
+
+        # --- FILE SYSTEM API (StreetLocal project) ---
+        elif self.path.startswith("/api/files/tree"):
+            # Return directory tree
+            import urllib.parse
+            query = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(query)
+            rel_path = params.get("path", [""])[0]
+            base = os.path.normpath(os.path.join(STREETLOCAL_ROOT, rel_path))
+            if not base.startswith(os.path.normpath(STREETLOCAL_ROOT)):
+                self.send_json({"error": "Access denied"}, 403)
+                return
+            try:
+                entries = []
+                for item in sorted(os.listdir(base)):
+                    if item in ('.git', 'node_modules', '__pycache__', '.env', 'dist'):
+                        continue
+                    full = os.path.join(base, item)
+                    rel = os.path.relpath(full, STREETLOCAL_ROOT).replace("\\", "/")
+                    entries.append({
+                        "name": item,
+                        "path": rel,
+                        "type": "dir" if os.path.isdir(full) else "file",
+                        "size": os.path.getsize(full) if os.path.isfile(full) else 0,
+                    })
+                self.send_json({"entries": entries, "path": rel_path})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path.startswith("/api/files/read"):
+            # Read file contents
+            import urllib.parse
+            query = urllib.parse.urlparse(self.path).query
+            params = urllib.parse.parse_qs(query)
+            rel_path = params.get("path", [""])[0]
+            full = os.path.normpath(os.path.join(STREETLOCAL_ROOT, rel_path))
+            if not full.startswith(os.path.normpath(STREETLOCAL_ROOT)):
+                self.send_json({"error": "Access denied"}, 403)
+                return
+            try:
+                with open(full, "r", encoding="utf-8", errors="ignore") as f:
+                    content = f.read()
+                ext = os.path.splitext(full)[1].lower()
+                lang_map = {'.jsx': 'javascript', '.js': 'javascript', '.ts': 'typescript', '.tsx': 'typescript',
+                            '.css': 'css', '.html': 'html', '.json': 'json', '.py': 'python', '.md': 'markdown',
+                            '.sql': 'sql', '.sh': 'shell', '.bat': 'bat', '.yml': 'yaml', '.yaml': 'yaml'}
+                self.send_json({"content": content, "path": rel_path, "language": lang_map.get(ext, "plaintext")})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path.startswith("/api/files/git-status"):
+            # Git status
+            import subprocess
+            try:
+                result = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True, cwd=STREETLOCAL_ROOT)
+                files = []
+                for line in result.stdout.strip().split("\n"):
+                    if line.strip():
+                        status = line[:2].strip()
+                        filepath = line[3:].strip()
+                        files.append({"status": status, "path": filepath})
+                self.send_json({"files": files, "clean": len(files) == 0})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        # Serve Monaco editor files
+        elif self.path.startswith("/monaco/"):
+            monaco_path = self.path.replace("/monaco/", "node_modules/monaco-editor/min/")
+            full_path = os.path.join(ROOT, monaco_path)
+            if os.path.exists(full_path) and os.path.isfile(full_path):
+                ext = os.path.splitext(full_path)[1]
+                content_types = {'.js': 'application/javascript', '.css': 'text/css', '.html': 'text/html', '.ttf': 'font/ttf', '.svg': 'image/svg+xml'}
+                self.send_response(200)
+                self.send_header("Content-Type", content_types.get(ext, "application/octet-stream"))
+                self.end_headers()
+                with open(full_path, "rb") as f:
+                    self.wfile.write(f.read())
+            else:
+                self.send_response(404)
+                self.end_headers()
 
         else:
             super().do_GET()

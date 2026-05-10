@@ -1,0 +1,24 @@
+{
+  "name": "jarvis",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Philip2024394/2bee.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Philip2024394/2bee/issues"
+  },
+  "homepage": "https://github.com/Philip2024394/2bee#readme",
+  "dependencies": {
+    "monaco-editor": "^0.55.1"
+  }
+}

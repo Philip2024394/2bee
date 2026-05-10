@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2B — Code Editor</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1e1e1e; color: #d4d4d4; font-family: 'Consolas','Courier New',monospace; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+/* Top Bar */
+#topbar { display:flex; align-items:center; padding:4px 10px; background:#2d2d2d; border-bottom:1px solid #3e3e3e; gap:8px; flex-shrink:0; height:36px; }
+#topbar .logo { color:#ffd700; font-weight:900; font-size:1em; letter-spacing:3px; cursor:pointer; }
+#topbar .logo:hover { text-shadow:0 0 8px rgba(255,215,0,0.4); }
+#topbar .file-path { color:#888; font-size:0.75em; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tb-btn { background:#3e3e3e; border:none; color:#d4d4d4; padding:4px 10px; font-family:inherit; font-size:0.7em; border-radius:4px; cursor:pointer; }
+.tb-btn:hover { background:#505050; }
+.tb-btn.save { background:#2ea043; color:#fff; }
+.tb-btn.save:hover { background:#3fb950; }
+.tb-btn.push { background:#1f6feb; color:#fff; }
+.tb-btn.push:hover { background:#388bfd; }
+.tb-btn.back { background:#ffd700; color:#1e1e1e; font-weight:700; }
+
+/* Main Layout */
+#main { display:flex; flex:1; overflow:hidden; }
+
+/* File Tree */
+#filetree { width:240px; background:#252526; border-right:1px solid #3e3e3e; overflow-y:auto; flex-shrink:0; }
+#filetree .tree-header { padding:8px 10px; font-size:0.7em; color:#888; text-transform:uppercase; letter-spacing:1px; font-weight:700; border-bottom:1px solid #3e3e3e; display:flex; justify-content:space-between; align-items:center; }
+.tree-item { display:flex; align-items:center; padding:3px 8px 3px 0; cursor:pointer; font-size:0.8em; transition:background 0.1s; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tree-item:hover { background:#2a2d2e; }
+.tree-item.active { background:#37373d; color:#fff; }
+.tree-item .icon { width:20px; text-align:center; flex-shrink:0; font-size:0.8em; }
+.tree-item .name { overflow:hidden; text-overflow:ellipsis; }
+.tree-item.dir { color:#c8c8c8; }
+.tree-item.file { color:#d4d4d4; }
+.tree-indent { display:inline-block; width:16px; flex-shrink:0; }
+
+/* Editor */
+#editor-wrap { flex:1; display:flex; flex-direction:column; min-width:0; }
+#tabs { display:flex; background:#2d2d2d; border-bottom:1px solid #3e3e3e; overflow-x:auto; flex-shrink:0; }
+.tab { padding:6px 12px; font-size:0.75em; cursor:pointer; border-right:1px solid #3e3e3e; display:flex; align-items:center; gap:6px; white-space:nowrap; color:#888; }
+.tab:hover { background:#2a2d2e; }
+.tab.active { background:#1e1e1e; color:#fff; border-bottom:2px solid #ffd700; }
+.tab .close { font-size:0.8em; opacity:0.5; cursor:pointer; }
+.tab .close:hover { opacity:1; color:#f44; }
+.tab .dot { width:6px; height:6px; border-radius:3px; background:#ffd700; display:none; }
+.tab.modified .dot { display:block; }
+#editor-container { flex:1; }
+
+/* Preview */
+#preview { width:0; border-left:1px solid #3e3e3e; transition:width 0.2s; overflow:hidden; background:#fff; }
+#preview.open { width:45%; }
+#preview iframe { width:100%; height:100%; border:none; }
+
+/* Status Bar */
+#statusbar { display:flex; padding:2px 10px; background:#007acc; color:#fff; font-size:0.65em; gap:12px; align-items:center; flex-shrink:0; }
+#statusbar .git { color:#ffd700; }
+
+/* Scrollbars */
+::-webkit-scrollbar { width:8px; height:8px; }
+::-webkit-scrollbar-track { background:#1e1e1e; }
+::-webkit-scrollbar-thumb { background:#424242; border-radius:4px; }
+::-webkit-scrollbar-thumb:hover { background:#555; }
+</style>
+</head>
+<body>
+
+<!-- Top Bar -->
+<div id="topbar">
+    <a href="/" class="logo" title="Back to 2B Chat">2B</a>
+    <span class="file-path" id="current-path">StreetLocal Project</span>
+    <button class="tb-btn save" onclick="saveFile()" title="Ctrl+S">💾 Save</button>
+    <button class="tb-btn" onclick="togglePreview()" title="Toggle preview">👁 Preview</button>
+    <button class="tb-btn push" onclick="gitPush()">⬆ Push to GitHub</button>
+    <button class="tb-btn" onclick="gitStatus()">📊 Git Status</button>
+    <button class="tb-btn back" onclick="window.location='/'">← 2B Chat</button>
+</div>
+
+<!-- Main Layout -->
+<div id="main">
+    <!-- File Tree -->
+    <div id="filetree">
+        <div class="tree-header">
+            <span>Explorer</span>
+            <button class="tb-btn" onclick="loadTree('')" style="font-size:0.9em;padding:2px 6px;">↻</button>
+        </div>
+        <div id="tree-content"></div>
+    </div>
+
+    <!-- Editor -->
+    <div id="editor-wrap">
+        <div id="tabs"></div>
+        <div id="editor-container"></div>
+    </div>
+
+    <!-- Live Preview -->
+    <div id="preview">
+        <iframe id="preview-frame" src="about:blank"></iframe>
+    </div>
+</div>
+
+<!-- Status Bar -->
+<div id="statusbar">
+    <span>2B Editor</span>
+    <span id="status-lang">—</span>
+    <span id="status-size">—</span>
+    <span class="git" id="status-git">Git: checking...</span>
+    <span style="flex:1"></span>
+    <span id="status-msg">Ready</span>
+</div>
+
+<!-- Monaco Editor -->
+<script src="/monaco/vs/loader.js"></script>
+<script>
+// ===== CONFIG =====
+require.config({ paths: { vs: '/monaco/vs' } });
+
+let editor = null;
+let openFiles = {}; // path -> { content, model, modified }
+let activeFile = null;
+
+// ===== INIT MONACO =====
+require(['vs/editor/editor.main'], function () {
+    editor = monaco.editor.create(document.getElementById('editor-container'), {
+        value: '// Welcome to 2B Editor\n// Open a file from the left panel to start editing.\n// Ctrl+S to save. Push to GitHub when ready.\n\n// Your StreetLocal project is loaded.',
+        language: 'javascript',
+        theme: 'vs-dark',
+        fontSize: 14,
+        fontFamily: "'Consolas', 'Courier New', monospace",
+        minimap: { enabled: true },
+        scrollBeyondLastLine: false,
+        automaticLayout: true,
+        tabSize: 2,
+        wordWrap: 'on',
+        formatOnPaste: true,
+        suggestOnTriggerCharacters: true,
+        quickSuggestions: true,
+        bracketPairColorization: { enabled: true },
+        guides: { bracketPairs: true, indentation: true },
+        renderLineHighlight: 'all',
+        cursorBlinking: 'smooth',
+        smoothScrolling: true,
+        padding: { top: 10 },
+    });
+
+    // Ctrl+S to save
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => saveFile());
+
+    // Track changes
+    editor.onDidChangeModelContent(() => {
+        if (activeFile && openFiles[activeFile]) {
+            openFiles[activeFile].modified = true;
+            updateTabs();
+        }
+    });
+
+    // Load file tree
+    loadTree('');
+    gitStatus();
+});
+
+// ===== FILE TREE =====
+async function loadTree(path, parentEl) {
+    try {
+        const res = await fetch(`/api/files/tree?path=${encodeURIComponent(path)}`);
+        const data = await res.json();
+        const container = parentEl || document.getElementById('tree-content');
+        if (!parentEl) container.innerHTML = '';
+
+        const depth = path ? path.split('/').length : 0;
+
+        data.entries.forEach(entry => {
+            const div = document.createElement('div');
+            div.className = `tree-item ${entry.type}`;
+            div.innerHTML = `${'<span class="tree-indent"></span>'.repeat(depth)}<span class="icon">${entry.type === 'dir' ? '📁' : getFileIcon(entry.name)}</span><span class="name">${entry.name}</span>`;
+
+            if (entry.type === 'dir') {
+                let loaded = false;
+                let expanded = false;
+                const children = document.createElement('div');
+                children.style.display = 'none';
+                div.onclick = async () => {
+                    expanded = !expanded;
+                    if (!loaded) {
+                        await loadTree(entry.path, children);
+                        loaded = true;
+                    }
+                    children.style.display = expanded ? 'block' : 'none';
+                    div.querySelector('.icon').textContent = expanded ? '📂' : '📁';
+                };
+                container.appendChild(div);
+                container.appendChild(children);
+            } else {
+                div.onclick = () => openFile(entry.path);
+                container.appendChild(div);
+            }
+        });
+    } catch (e) {
+        console.error('Tree load error:', e);
+    }
+}
+
+function getFileIcon(name) {
+    if (name.endsWith('.jsx')) return '⚛';
+    if (name.endsWith('.js')) return '📜';
+    if (name.endsWith('.css')) return '🎨';
+    if (name.endsWith('.html')) return '🌐';
+    if (name.endsWith('.json')) return '{}';
+    if (name.endsWith('.md')) return '📝';
+    if (name.endsWith('.py')) return '🐍';
+    if (name.endsWith('.sql')) return '🗃';
+    return '📄';
+}
+
+// ===== FILE OPERATIONS =====
+async function openFile(path) {
+    try {
+        setStatus('Loading ' + path + '...');
+        const res = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`);
+        const data = await res.json();
+        if (data.error) { setStatus('Error: ' + data.error); return; }
+
+        // Create or reuse model
+        if (!openFiles[path]) {
+            const uri = monaco.Uri.parse('file:///' + path);
+            const model = monaco.editor.createModel(data.content, data.language, uri);
+            openFiles[path] = { content: data.content, model, modified: false, language: data.language };
+        }
+
+        activeFile = path;
+        editor.setModel(openFiles[path].model);
+        document.getElementById('current-path').textContent = path;
+        document.getElementById('status-lang').textContent = data.language;
+        document.getElementById('status-size').textContent = (data.content.length / 1024).toFixed(1) + ' KB';
+        updateTabs();
+        setStatus('Opened ' + path);
+
+        // Highlight in tree
+        document.querySelectorAll('.tree-item').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.tree-item.file').forEach(el => {
+            if (el.querySelector('.name')?.textContent === path.split('/').pop()) el.classList.add('active');
+        });
+    } catch (e) {
+        setStatus('Error: ' + e.message);
+    }
+}
+
+async function saveFile() {
+    if (!activeFile || !openFiles[activeFile]) { setStatus('No file open'); return; }
+    const content = openFiles[activeFile].model.getValue();
+    try {
+        setStatus('Saving...');
+        const res = await fetch('/api/files/write', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: activeFile, content })
+        });
+        const data = await res.json();
+        if (data.success) {
+            openFiles[activeFile].modified = false;
+            openFiles[activeFile].content = content;
+            updateTabs();
+            setStatus('Saved ' + activeFile + ' (' + data.size + ' bytes)');
+            // Refresh preview if open
+            const iframe = document.getElementById('preview-frame');
+            if (iframe.src !== 'about:blank') iframe.src = iframe.src;
+        } else {
+            setStatus('Save failed: ' + data.error);
+        }
+    } catch (e) {
+        setStatus('Save error: ' + e.message);
+    }
+}
+
+// ===== TABS =====
+function updateTabs() {
+    const tabsEl = document.getElementById('tabs');
+    tabsEl.innerHTML = '';
+    Object.keys(openFiles).forEach(path => {
+        const f = openFiles[path];
+        const name = path.split('/').pop();
+        const tab = document.createElement('div');
+        tab.className = `tab ${path === activeFile ? 'active' : ''} ${f.modified ? 'modified' : ''}`;
+        tab.innerHTML = `<span class="dot"></span>${getFileIcon(name)} ${name}<span class="close" onclick="event.stopPropagation();closeTab('${path}')">&times;</span>`;
+        tab.onclick = () => { activeFile = path; editor.setModel(f.model); document.getElementById('current-path').textContent = path; updateTabs(); };
+        tabsEl.appendChild(tab);
+    });
+}
+
+function closeTab(path) {
+    if (openFiles[path]) {
+        if (openFiles[path].modified && !confirm('Unsaved changes. Close anyway?')) return;
+        openFiles[path].model.dispose();
+        delete openFiles[path];
+        if (activeFile === path) {
+            const remaining = Object.keys(openFiles);
+            if (remaining.length) { activeFile = remaining[0]; editor.setModel(openFiles[activeFile].model); }
+            else { activeFile = null; editor.setModel(monaco.editor.createModel('// No file open', 'plaintext')); }
+        }
+        updateTabs();
+    }
+}
+
+// ===== GIT =====
+async function gitStatus() {
+    try {
+        const res = await fetch('/api/files/git-status');
+        const data = await res.json();
+        const el = document.getElementById('status-git');
+        if (data.clean) {
+            el.textContent = 'Git: clean ✓';
+            el.style.color = '#3fb950';
+        } else {
+            el.textContent = `Git: ${data.files.length} changed`;
+            el.style.color = '#ffd700';
+        }
+    } catch (e) {
+        document.getElementById('status-git').textContent = 'Git: error';
+    }
+}
+
+async function gitPush() {
+    const msg = prompt('Commit message:', 'Update from 2B Editor');
+    if (!msg) return;
+    setStatus('Pushing to GitHub...');
+    try {
+        const res = await fetch('/api/files/git-push', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: msg })
+        });
+        const data = await res.json();
+        if (data.success) {
+            setStatus('Pushed to GitHub ✓');
+            gitStatus();
+        } else {
+            setStatus('Push failed: ' + (data.push || data.error));
+        }
+    } catch (e) {
+        setStatus('Push error: ' + e.message);
+    }
+}
+
+// ===== PREVIEW =====
+function togglePreview() {
+    const p = document.getElementById('preview');
+    p.classList.toggle('open');
+    if (p.classList.contains('open')) {
+        // Auto-detect which app to preview based on active file
+        let port = 5174;
+        let base = '/food/basic/';
+        if (activeFile) {
+            if (activeFile.startsWith('products-local')) { port = 5178; base = '/products/local/'; }
+            else if (activeFile.startsWith('landing')) { port = 5176; base = '/'; }
+            else if (activeFile.startsWith('food-pro')) { port = 5175; base = '/food/pro/'; }
+            else if (activeFile.startsWith('property-agent')) { port = 5177; base = '/property/'; }
+        }
+        document.getElementById('preview-frame').src = `http://localhost:${port}${base}?demo=true`;
+    }
+    editor.layout();
+}
+
+// ===== UTILS =====
+function setStatus(msg) {
+    document.getElementById('status-msg').textContent = msg;
+    setTimeout(() => { document.getElementById('status-msg').textContent = 'Ready'; }, 5000);
+}
+
+// Resize handler
+window.addEventListener('resize', () => { if (editor) editor.layout(); });
+</script>
+</body>
+</html>

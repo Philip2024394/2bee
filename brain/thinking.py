@@ -267,8 +267,8 @@ def classify_intent(text):
                                  "who built you")):
         return "about_2B"
 
-    # "Tell me about X" / "What is X"
-    if re.match(r"(tell me about|what is|what are|what's|who is|who are|explain|describe|define)\s", lower):
+    # "Tell me about X" / "What is X" / "What does X mean" / "Meaning of X"
+    if re.match(r"(tell me about|what is|what are|what's|what does|what do|who is|who are|explain|describe|define|meaning of)\s", lower):
         return "query"
 
     # General question (starts with question word or ends with ?)
@@ -405,6 +405,10 @@ def is_teaching_fact(text):
     if "?" in text or len(text) < 8 or len(text) > 240:
         return None
     if any(text.lower().startswith(w) for w in ("i think", "i believe", "i feel", "maybe", "probably", "i'm", "im ", "you ", "we ")):
+        return None
+    # Skip questions like "what is X", "where is X", "who is X" etc — these are queries, not teaching.
+    QUESTION_STARTS = ("what ", "where ", "when ", "who ", "why ", "how ", "which ", "whose ", "is ", "are ", "do ", "does ", "did ", "can ", "could ", "will ", "would ", "should ")
+    if any(lower.startswith(q) for q in QUESTION_STARTS):
         return None
     definition = re.match(r"^(?:the\s+|our\s+|my\s+)?([a-z][a-z0-9_\s]{2,40}?)\s+(?:is|are|equals?|=)\s+(.+)$", lower)
     if definition:
@@ -700,6 +704,39 @@ def handle_opinion(text):
     return pick(OPINION_RESPONSES)
 
 
+def _lookup_grammar(subject):
+    """If the subject is a single short word that matches a grammar fact,
+    return a formatted answer. Otherwise return None so the caller can fall
+    through to web research."""
+    if not subject:
+        return None
+    word = subject.lower().strip().rstrip("?.").strip()
+    # Strip wrapper phrases that survived pattern extraction.
+    for prefix in ("the word ", "the meaning of ", "meaning of ", "a ", "an ", "the "):
+        if word.startswith(prefix):
+            word = word[len(prefix):].strip()
+    word = word.replace(" ", "_")
+    # Only accept short, simple tokens — grammar lookups are for words, not phrases.
+    if len(word) > 20 or " " in subject and len(subject.split()) > 3:
+        return None
+    from brain.memory import get_db
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT topic, info FROM facts WHERE topic = ? AND source = 'grammar_seed'",
+        (word,),
+    ).fetchall()
+    conn.close()
+    if not rows:
+        return None
+    # Prefer the row whose info starts with the queried word (the definition entry)
+    # so "what is a pronoun" returns "pronoun — ..." not the first member of the category.
+    head_word = word.replace("_", " ")
+    for r in rows:
+        if r["info"].lower().startswith(head_word + " ") or r["info"].lower().startswith(head_word + " —"):
+            return r["info"]
+    return rows[0]["info"]
+
+
 def handle_query(text):
     """Handle 'tell me about X', 'what is X', etc."""
     lower = text.lower().strip()
@@ -739,12 +776,14 @@ def handle_query(text):
     # Extract what they're asking about
     patterns = [
         r"tell me about (.+)",
+        r"what (?:does|do) (.+?) mean[\?\.]?$",
         r"what (?:is|are) (.+?)[\?\.]?$",
         r"what's (.+?)[\?\.]?$",
         r"who (?:is|are) (.+?)[\?\.]?$",
         r"explain (.+?)[\?\.]?$",
         r"describe (.+?)[\?\.]?$",
         r"define (.+?)[\?\.]?$",
+        r"meaning of (.+?)[\?\.]?$",
     ]
     subject = None
     for p in patterns:
@@ -757,6 +796,12 @@ def handle_query(text):
         subject = " ".join(extract_topic(text))
 
     if subject:
+        # Grammar lookup — covers "what is when", "what does am mean", etc.
+        # Runs before StreetLocal so single-word grammar queries don't hit unrelated facts.
+        grammar_hit = _lookup_grammar(subject)
+        if grammar_hit:
+            return grammar_hit
+
         # First check: does the query mention StreetLocal products?
         sl_products = {
             'streetlocal': 'streetlocal', 'street local': 'streetlocal',

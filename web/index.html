@@ -1437,12 +1437,12 @@ function renderChatImage(div, url, prompt, id, imgEl) {
         <div style="margin:6px 0;border-radius:10px;overflow:hidden;border:1px solid #1a3a5c;max-width:400px;">
             <img src="${imgSrc}" alt="${prompt}" style="width:100%;display:block;cursor:pointer;" onclick="window.open(this.src,'_blank')" />
         </div>
-        <div style="font-size:0.75em;color:#8a7a4a;margin-bottom:6px;">Image confirmed.</div>
+        <div style="font-size:0.7em;color:#555;margin:4px 0 6px;">Prompt: ${prompt.substring(0,80)}</div>
+        <textarea id="comment-${id}" placeholder="Add comments... what to change, what you like, what's wrong" style="width:100%;max-width:400px;background:#141921;border:1px solid #1a3a5c;color:#d4d4d4;padding:8px 10px;font-family:inherit;font-size:0.8em;border-radius:8px;outline:none;resize:vertical;min-height:50px;margin-bottom:6px;" rows="2"></textarea>
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <button onclick="rateImage(this,'up','${id}')" style="background:#00ff88;color:#0a0a0f;border:none;border-radius:6px;padding:4px 10px;font-size:0.8em;cursor:pointer;">👍</button>
-            <button onclick="rateImage(this,'down','${id}')" style="background:#ff4444;color:#fff;border:none;border-radius:6px;padding:4px 10px;font-size:0.8em;cursor:pointer;">👎</button>
-            <button onclick="generateImageInChat('${safePrompt}','${document.getElementById('image-model').value || 'flux-schnell'}')" style="background:#1a3a5c;color:#ffd700;border:none;border-radius:6px;padding:4px 10px;font-size:0.8em;cursor:pointer;">🔄 Retry</button>
-            <button onclick="downloadImage('${imgSrc}','2b-${id}.png')" style="background:#1a3a5c;color:#ffd700;border:none;border-radius:6px;padding:4px 10px;font-size:0.8em;cursor:pointer;">⬇ Save</button>
+            <button onclick="approveImage('${id}','${safePrompt}')" style="background:#00ff88;color:#0a0a0f;border:none;border-radius:8px;padding:6px 16px;font-size:0.8em;cursor:pointer;font-weight:700;">✅ Yes — Accept</button>
+            <button onclick="rejectAndRetry('${id}','${safePrompt}')" style="background:#ff4444;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:0.8em;cursor:pointer;font-weight:700;">❌ No — Retry</button>
+            <button onclick="downloadImage('${imgSrc}','2b-${id}.png')" style="background:#1a3a5c;color:#ffd700;border:none;border-radius:8px;padding:6px 12px;font-size:0.8em;cursor:pointer;">⬇</button>
         </div>
     `;
     div.dataset.prompt = prompt;
@@ -1451,7 +1451,51 @@ function renderChatImage(div, url, prompt, id, imgEl) {
 
     const chatEl = document.getElementById('chat');
     chatEl.scrollTop = chatEl.scrollHeight;
-    speak('Image confirmed.');
+    speak('Image ready for review.');
+}
+
+function approveImage(id, prompt) {
+    const comment = document.getElementById('comment-' + id)?.value?.trim() || '';
+    const div = document.getElementById(id);
+
+    // Disable buttons
+    div.querySelectorAll('button').forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+
+    // Store positive feedback in 2B memory
+    const feedback = comment ? `APPROVED: ${prompt}. Comment: ${comment}` : `APPROVED: ${prompt}`;
+    _origSend(`remember design preference: ${feedback}. This is a GOOD image style — use as reference.`);
+
+    addMessage('bee', `✅ Image accepted.${comment ? '\nYour note: ' + comment : ''}\nStored as positive reference.`);
+    speak('Image accepted.');
+}
+
+function rejectAndRetry(id, prompt) {
+    const comment = document.getElementById('comment-' + id)?.value?.trim() || '';
+    const div = document.getElementById(id);
+
+    if (!comment) {
+        // Highlight the comment box
+        const textarea = document.getElementById('comment-' + id);
+        textarea.style.borderColor = '#ff4444';
+        textarea.placeholder = 'Please describe what to change before rejecting...';
+        textarea.focus();
+        return;
+    }
+
+    // Disable buttons
+    div.querySelectorAll('button').forEach(b => { b.disabled = true; b.style.opacity = '0.5'; });
+
+    // Store negative feedback
+    _origSend(`remember design preference: REJECTED image — ${prompt}. Reason: ${comment}. Avoid this style. Apply these changes next time.`);
+
+    addMessage('bee', `❌ Rejected. Feedback: "${comment}"\n\nRegenerating with your changes...`);
+    speak('Regenerating with your feedback.');
+
+    // Retry with the comment added to the prompt
+    const improvedPrompt = prompt + ', ' + comment;
+    setTimeout(() => {
+        generateImageInChat(improvedPrompt, document.getElementById('image-model-main')?.value || 'flux-schnell');
+    }, 500);
 }
 
 function downloadImage(url, filename) {

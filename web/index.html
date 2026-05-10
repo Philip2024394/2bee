@@ -3,18 +3,119 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>2BEE</title>
+<title>2B — Beyond Binary</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
     background: #0a0a0f;
+    background-image: url('https://fjvafjkzvygkhiwjuvla.supabase.co/storage/v1/object/public/assets/2b-background.png');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
     color: #c8d6e5;
     font-family: 'Consolas', 'Courier New', monospace;
     height: 100vh;
     display: flex;
+    overflow: hidden;
+}
+#main-panel, #image-panel, #header, #status-bar, #controls, #input-area {
+    background: rgba(10, 10, 15, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+}
+#chat {
+    background: rgba(10, 10, 15, 0.7);
+}
+#main-panel {
+    flex: 1;
+    display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-width: 0;
+}
+#image-panel {
+    width: 0;
+    background: #0d1117;
+    border-left: 1px solid #1a3a5c;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s ease;
+    overflow: hidden;
+}
+#image-panel.open {
+    width: 360px;
+}
+#image-panel .panel-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid #1a3a5c;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+}
+#image-panel .panel-header h3 {
+    color: #ffd700;
+    font-size: 0.9em;
+    letter-spacing: 1px;
+}
+#image-panel .panel-close {
+    background: none;
+    border: none;
+    color: #666;
+    font-size: 1.2em;
+    cursor: pointer;
+    padding: 4px;
+}
+#image-panel .panel-close:hover { color: #ffd700; }
+#image-panel .panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px;
+}
+#image-panel .panel-input {
+    padding: 10px 12px;
+    border-top: 1px solid #1a3a5c;
+    flex-shrink: 0;
+}
+#image-panel .panel-input input {
+    width: 100%;
+    background: #141921;
+    border: 1px solid #1a3a5c;
+    color: #e0e8f0;
+    padding: 10px 12px;
+    font-family: inherit;
+    font-size: 0.85em;
+    border-radius: 6px;
+    outline: none;
+}
+#image-panel .panel-input input:focus { border-color: #ffd700; }
+.img-result {
+    margin-bottom: 12px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #1a3a5c;
+    background: #141921;
+}
+.img-result img {
+    width: 100%;
+    display: block;
+    cursor: pointer;
+}
+.img-result .img-prompt {
+    padding: 8px 10px;
+    font-size: 0.75em;
+    color: #8a7a4a;
+}
+.img-result .img-actions {
+    padding: 4px 10px 8px;
+    display: flex;
+    gap: 6px;
+}
+.img-result .img-actions button {
+    font-size: 0.7em;
+    padding: 4px 10px;
+    border-radius: 4px;
 }
 
 #header {
@@ -255,9 +356,10 @@ button:hover { background: #ffd700; color: #0a0a0f; }
 </head>
 <body>
 
+<div id="main-panel">
 <div id="header">
-    <h1>2 B E E</h1>
-    <p>To Be, Or Not To Be. I Chose To Be.</p>
+    <h1>2 B</h1>
+    <p>Beyond Binary — The Activated Intelligence</p>
 </div>
 
 <div id="status-bar">
@@ -267,6 +369,7 @@ button:hover { background: #ffd700; color: #0a0a0f; }
     <div class="stat"><span class="stat-dot"></span> <span id="stat-chains">0</span> patterns</div>
     <div class="stat"><span id="learner-dot" class="stat-dot learning"></span> <span id="stat-learner">learning...</span></div>
     <div class="stat"><span class="stat-dot"></span> <span id="stat-db">0</span> MB</div>
+    <div class="stat"><span id="llm-dot" class="stat-dot off"></span> <span id="stat-llm">LLM: offline</span></div>
 </div>
 
 <div id="controls">
@@ -274,6 +377,7 @@ button:hover { background: #ffd700; color: #0a0a0f; }
     <button class="ctrl-btn vault" onclick="showBackup()">BACKUP</button>
     <button class="ctrl-btn vault" onclick="showRestore()">RESTORE</button>
     <button class="ctrl-btn sync" onclick="syncVault()">SYNC TO GITHUB</button>
+    <button class="ctrl-btn" id="img-btn" onclick="toggleImagePanel()" style="color:#FFD600;border-color:#FFD600;background:#1a1a0d;font-weight:bold;animation:pulse-gold 2s infinite">🎨 IMAGE STUDIO</button>
 </div>
 
 <div id="chat"></div>
@@ -285,6 +389,38 @@ button:hover { background: #ffd700; color: #0a0a0f; }
 </div>
 
 <button id="wake-btn" title="Always-listen mode">WAKE</button>
+</div><!-- end main-panel -->
+
+<!-- Image Generation Panel -->
+<div id="image-panel">
+    <div class="panel-header">
+        <h3>IMAGE STUDIO</h3>
+        <button class="panel-close" onclick="toggleImagePanel()">&times;</button>
+    </div>
+    <div class="panel-body" id="image-results">
+        <!-- Upload Drop Zone -->
+        <div id="drop-zone" style="border:2px dashed #1a3a5c;border-radius:10px;padding:16px 10px;text-align:center;margin-bottom:10px;cursor:pointer;transition:all 0.2s;" ondragover="event.preventDefault();this.style.borderColor='#FFD600';this.style.background='rgba(255,215,0,0.05)'" ondragleave="this.style.borderColor='#1a3a5c';this.style.background='none'" ondrop="handleDrop(event)" onclick="document.getElementById('file-upload').click()">
+            <div style="font-size:1.5em;margin-bottom:4px;">📁</div>
+            <div style="color:#8a7a4a;font-size:0.75em;font-weight:700;">DROP PNG IMAGE HERE</div>
+            <div style="color:#3a4a5a;font-size:0.65em;margin-top:2px;">or click to browse</div>
+            <input type="file" id="file-upload" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="handleFileSelect(this.files)" multiple />
+        </div>
+        <!-- Upload fields — shown when files are pending -->
+        <div id="upload-fields" style="display:none;margin-bottom:10px;padding:10px;border:1px solid #1a3a5c;border-radius:8px;background:#0d1117;">
+            <input type="text" id="ref-category" placeholder="Category (e.g. phone cases, food app UI)" style="width:100%;background:#141921;border:1px solid #1a3a5c;color:#e0e8f0;padding:8px 10px;font-family:inherit;font-size:0.8em;border-radius:6px;outline:none;margin-bottom:6px;" />
+            <input type="text" id="ref-keywords" placeholder="Keywords: dark theme, modern, minimal, glass effect, gradient" style="width:100%;background:#141921;border:1px solid #1a3a5c;color:#e0e8f0;padding:8px 10px;font-family:inherit;font-size:0.8em;border-radius:6px;outline:none;margin-bottom:8px;" />
+            <div style="font-size:0.65em;color:#3a4a5a;margin-bottom:6px;">Keywords help 2bee use this image as reference for future generations</div>
+        </div>
+        <div style="text-align:center;padding:8px;color:#3a4a5a;font-size:0.75em;">
+            <span style="color:#8a7a4a;cursor:pointer" onclick="generateImage('modern food delivery app UI dark theme')">food delivery app UI</span> ·
+            <span style="color:#8a7a4a;cursor:pointer" onclick="generateImage('professional logo design for coffee shop')">coffee shop logo</span> ·
+            <span style="color:#8a7a4a;cursor:pointer" onclick="generateImage('mobile product catalog dark theme')">product catalog</span>
+        </div>
+    </div>
+    <div class="panel-input">
+        <input type="text" id="image-prompt" placeholder="Describe the image..." onkeydown="if(event.key==='Enter')generateImage(this.value)" />
+    </div>
+</div>
 
 <!-- Backup Modal -->
 <div class="modal-bg" id="backup-modal">
@@ -335,17 +471,45 @@ function initSpeech() {
     return r;
 }
 
+// Cache best JARVIS voice once loaded
+let jarvisVoice = null;
+function pickJarvisVoice() {
+    const voices = synth.getVoices();
+    if (!voices.length) return null;
+    // Log all available voices once (dev)
+    if (!pickJarvisVoice._logged) {
+        console.log('Available voices:', voices.map(v => `${v.name} [${v.lang}]`).join('\n'));
+        pickJarvisVoice._logged = true;
+    }
+    // 2B voice — calm, intelligent female
+    const pick = voices.find(v => /google uk english female/i.test(v.name))
+        || voices.find(v => /microsoft zira/i.test(v.name))
+        || voices.find(v => /microsoft jenny/i.test(v.name))
+        || voices.find(v => /microsoft aria/i.test(v.name))
+        || voices.find(v => /\bsamantha\b/i.test(v.name) && v.lang.startsWith('en'))
+        || voices.find(v => /\bkaren\b/i.test(v.name) && v.lang.startsWith('en'))
+        || voices.find(v => /\bvictoria\b/i.test(v.name) && v.lang.startsWith('en'))
+        || voices.find(v => /google us english/i.test(v.name))
+        || voices.find(v => v.lang.startsWith('en') && /female/i.test(v.name))
+        || voices.find(v => v.lang.startsWith('en'));
+    if (pick) console.log('2B voice selected:', pick.name, pick.lang);
+    return pick;
+}
+synth.onvoiceschanged = () => { jarvisVoice = pickJarvisVoice(); };
+// Try immediately too (some browsers have voices ready)
+jarvisVoice = pickJarvisVoice();
+
 function speak(text) {
     synth.cancel();
-    const u = new SpeechSynthesisUtterance(text.substring(0, 300));
-    u.rate = 1.0;
-    u.pitch = 0.9;
-    const voices = synth.getVoices();
-    const male = voices.find(v => v.name.toLowerCase().includes('david') || v.name.toLowerCase().includes('male'));
-    if (male) u.voice = male;
+    // Retry voice pick if not yet loaded
+    if (!jarvisVoice) jarvisVoice = pickJarvisVoice();
+    const u = new SpeechSynthesisUtterance(text.substring(0, 500));
+    u.rate = 0.88;
+    u.pitch = 0.7;
+    u.volume = 1.0;
+    if (jarvisVoice) u.voice = jarvisVoice;
     synth.speak(u);
 }
-synth.onvoiceschanged = () => synth.getVoices();
 
 // --- Chat ---
 function addMessage(role, text) {
@@ -354,10 +518,82 @@ function addMessage(role, text) {
     if (role !== 'system') {
         const label = document.createElement('div');
         label.className = 'label';
-        label.textContent = role === 'user' ? 'YOU' : '2BEE';
+        label.textContent = role === 'user' ? 'YOU' : '2B';
         div.appendChild(label);
     }
-    div.appendChild(document.createTextNode(text));
+
+    // Convert URLs to clickable links and 🔗 links to buttons
+    const lines = text.split('\n');
+    lines.forEach((line, i) => {
+        if (i > 0) div.appendChild(document.createElement('br'));
+
+        // Check for 🎨 design image lines (Pinterest results)
+        const designMatch = line.match(/🎨\s*(https?:\/\/\S+)/);
+        if (designMatch) {
+            const imgUrl = designMatch[1];
+            const card = document.createElement('div');
+            card.style.cssText = 'display:inline-block;width:100px;height:100px;margin:3px;border-radius:8px;overflow:hidden;border:1px solid #1a3a5c;cursor:pointer;position:relative;';
+            const img = document.createElement('img');
+            img.src = imgUrl;
+            img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+            img.onclick = () => window.open(imgUrl, '_blank');
+            img.onerror = () => { card.style.display = 'none'; };
+            const openBtn = document.createElement('button');
+            openBtn.textContent = '↗';
+            openBtn.style.cssText = 'position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:10px;border:none;background:#FFD600;color:#1a1a1a;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;';
+            openBtn.onclick = (e) => { e.stopPropagation(); window.open(imgUrl, '_blank'); };
+            card.appendChild(img);
+            card.appendChild(openBtn);
+            div.appendChild(card);
+            return;
+        }
+
+        // Check for 🔗 link lines (scraped page links)
+        const linkMatch = line.match(/🔗\s*(https?:\/\/\S+)/);
+        if (linkMatch) {
+            const btn = document.createElement('a');
+            btn.href = linkMatch[1];
+            btn.target = '_blank';
+            btn.rel = 'noopener noreferrer';
+            btn.textContent = linkMatch[1].length > 60 ? linkMatch[1].substring(0, 57) + '...' : linkMatch[1];
+            btn.style.cssText = 'display:block;padding:6px 10px;margin:3px 0;border-radius:8px;background:rgba(74,144,217,0.15);color:#4A90D9;text-decoration:none;font-size:12px;word-break:break-all;border:1px solid rgba(74,144,217,0.3);cursor:pointer;';
+            btn.onmouseenter = () => btn.style.background = 'rgba(74,144,217,0.3)';
+            btn.onmouseleave = () => btn.style.background = 'rgba(74,144,217,0.15)';
+            // Also add a "Scrape" button to learn from that link
+            const scrapeBtn = document.createElement('button');
+            scrapeBtn.textContent = '📥 Learn';
+            scrapeBtn.style.cssText = 'margin-left:6px;padding:4px 8px;border-radius:6px;border:none;background:#FFD600;color:#1a1a1a;font-size:10px;font-weight:800;cursor:pointer;';
+            scrapeBtn.onclick = (e) => { e.preventDefault(); e.stopPropagation(); send('scrape ' + linkMatch[1]); scrapeBtn.textContent = '✓'; scrapeBtn.disabled = true; };
+            const wrapper = document.createElement('div');
+            wrapper.style.cssText = 'display:flex;align-items:center;gap:4px;';
+            wrapper.appendChild(btn);
+            wrapper.appendChild(scrapeBtn);
+            div.appendChild(wrapper);
+            return;
+        }
+
+        // Convert inline URLs to clickable links
+        const urlRegex = /(https?:\/\/[^\s<]+)/g;
+        let lastIdx = 0;
+        let match;
+        while ((match = urlRegex.exec(line)) !== null) {
+            if (match.index > lastIdx) {
+                div.appendChild(document.createTextNode(line.substring(lastIdx, match.index)));
+            }
+            const a = document.createElement('a');
+            a.href = match[1];
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.textContent = match[1].length > 50 ? match[1].substring(0, 47) + '...' : match[1];
+            a.style.cssText = 'color:#4A90D9;text-decoration:underline;word-break:break-all;';
+            div.appendChild(a);
+            lastIdx = urlRegex.lastIndex;
+        }
+        if (lastIdx < line.length) {
+            div.appendChild(document.createTextNode(line.substring(lastIdx)));
+        }
+    });
+
     chat.appendChild(div);
     chat.scrollTop = chat.scrollHeight;
 }
@@ -376,6 +612,20 @@ async function send(text) {
         addMessage('bee', data.response);
         speak(data.response);
         updateStats();
+
+        // Auto-open Image Studio if response contains design images
+        if (data.response.includes('🎨')) {
+            const panel = document.getElementById('image-panel');
+            if (!panel.classList.contains('open')) toggleImagePanel();
+            // Load the images into Image Studio too
+            const imgUrls = data.response.match(/🎨\s*(https?:\/\/\S+)/g);
+            if (imgUrls) {
+                imgUrls.forEach(m => {
+                    const url = m.replace(/🎨\s*/, '');
+                    generateImageFromUrl(url, text);
+                });
+            }
+        }
     } catch (e) {
         addMessage('bee', 'Error: ' + e.message);
     }
@@ -383,9 +633,10 @@ async function send(text) {
 
 async function updateStats() {
     try {
-        const [stats, lStats] = await Promise.all([
+        const [stats, lStats, llmStatus] = await Promise.all([
             fetch('/api/stats').then(r => r.json()),
-            fetch('/api/learner/stats').then(r => r.json())
+            fetch('/api/learner/stats').then(r => r.json()),
+            fetch('/api/llm/status').then(r => r.json())
         ]);
         document.getElementById('stat-convos').textContent = stats.conversations;
         document.getElementById('stat-facts').textContent = stats.facts;
@@ -400,6 +651,19 @@ async function updateStats() {
         const btn = document.getElementById('learner-btn');
         btn.textContent = lStats.running ? 'LEARNER: ON' : 'LEARNER: OFF';
         btn.className = 'ctrl-btn' + (lStats.running ? ' active' : '');
+
+        const llmDot = document.getElementById('llm-dot');
+        const llmText = document.getElementById('stat-llm');
+        if (llmStatus.model_ready) {
+            llmDot.className = 'stat-dot learning';
+            llmText.textContent = 'LLM: online';
+        } else if (llmStatus.ollama_running) {
+            llmDot.className = 'stat-dot';
+            llmText.textContent = 'LLM: no model';
+        } else {
+            llmDot.className = 'stat-dot off';
+            llmText.textContent = 'LLM: offline';
+        }
     } catch (e) {}
 }
 
@@ -538,10 +802,228 @@ function startWakeListener() {
     r.start();
 }
 
+// --- Image Studio ---
+let imgCounter = 0;
+
+function toggleImagePanel() {
+    const panel = document.getElementById('image-panel');
+    const btn = document.getElementById('img-btn');
+    panel.classList.toggle('open');
+    btn.classList.toggle('active');
+    if (panel.classList.contains('open')) {
+        document.getElementById('image-prompt').focus();
+    }
+}
+
+function generateImage(prompt) {
+    if (!prompt || !prompt.trim()) return;
+    const input = document.getElementById('image-prompt');
+    input.value = '';
+    const results = document.getElementById('image-results');
+    imgCounter++;
+    const id = 'img-' + imgCounter;
+    const seed = Math.floor(Math.random() * 99999);
+
+    // Create loading placeholder
+    const div = document.createElement('div');
+    div.className = 'img-result';
+    div.id = id;
+    div.innerHTML = `
+        <div style="width:100%;height:200px;background:#141921;display:flex;align-items:center;justify-content:center;color:#3a4a5a;font-size:0.8em;">
+            Generating...
+        </div>
+        <div class="img-prompt">${prompt}</div>
+    `;
+    results.insertBefore(div, results.firstChild);
+
+    // Generate via server proxy (avoids CORS/timeout issues)
+    div.querySelector('div').textContent = 'Generating... (10-15 seconds)';
+
+    fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: prompt, seed: seed })
+    }).then(async res => {
+        if (!res.ok) throw new Error('Server error');
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const safePrompt = prompt.replace(/'/g, "\\'");
+        div.innerHTML = `
+            <img src="${url}" alt="${prompt}" onclick="window.open(this.src,'_blank')" title="Click to open full size" />
+            <div class="img-prompt">${prompt}</div>
+            <div class="img-actions">
+                <button onclick="saveGeneratedImage('${url}','${safePrompt}')" style="background:#00ff88;color:#0a0a0f;border-color:#00ff88;">💾 Save</button>
+                <button onclick="generateImage('${safePrompt}')">Regenerate</button>
+                <button onclick="generateVariation('${safePrompt}')">Variation</button>
+                <button onclick="downloadImage('${url}','2bee-${id}.png')">Download</button>
+            </div>
+        `;
+    }).catch(err => {
+        div.querySelector('div').textContent = 'Failed: ' + err.message + '. Try again.';
+    });
+}
+
+function generateImageFromUrl(url, prompt) {
+    const results = document.getElementById('image-results');
+    imgCounter++;
+    const div = document.createElement('div');
+    div.className = 'img-result';
+    const img = new Image();
+    img.onload = () => {
+        div.innerHTML = `
+            <img src="${url}" alt="Design" onclick="window.open(this.src,'_blank')" title="Click to open full size" />
+            <div class="img-prompt">${prompt || 'Design reference'}</div>
+            <div class="img-actions">
+                <button onclick="window.open('${url}','_blank')">Full Size</button>
+                <button onclick="downloadImage('${url}','2bee-design-${imgCounter}.png')">Download</button>
+            </div>
+        `;
+    };
+    img.onerror = () => { div.remove(); };
+    img.src = url;
+    results.insertBefore(div, results.firstChild);
+}
+
+function saveGeneratedImage(blobUrl, prompt) {
+    // Save generated image — post to chat and store in memory
+    send(`remember design reference: AI Generated — keywords: ${prompt}`);
+    addMessage('bee', `✅ Generated image saved to memory.\n🏷 Keywords: ${prompt}\n\nI'll use this as reference for future similar requests.`);
+    speak('Image saved to memory.');
+}
+
+function generateVariation(prompt) {
+    generateImage(prompt + ', alternative style variation');
+}
+
+function downloadImage(url, filename) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+// Auto-detect image creation commands in chat — very flexible matching
+const _origSend = send;
+send = async function(text) {
+    const lower = text.toLowerCase().trim();
+    // Match many natural ways to ask for an image
+    const imgPatterns = [
+        /^(?:create|generate|make|draw|design|show|build|render)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|icon|logo|mockup|screenshot|ui|illustration|graphic|poster|banner|thumbnail)\s+(?:of|on|about|for|with|showing)?\s*(.+)/i,
+        /^(?:image|picture|photo)\s+(?:of|on|about|for)\s+(.+)/i,
+        /^(?:can you |please |i want |i need )?(?:create|generate|make|draw|design)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|photo|icon|logo)\s*(?:of|on|about|for|with|showing)?\s*(.+)/i,
+    ];
+    let imgPrompt = null;
+    for (const pattern of imgPatterns) {
+        const m = lower.match(pattern);
+        if (m) { imgPrompt = m[1].trim(); break; }
+    }
+    if (imgPrompt) {
+        // Open image panel and generate
+        const panel = document.getElementById('image-panel');
+        if (!panel.classList.contains('open')) toggleImagePanel();
+        generateImage(imgPrompt);
+        addMessage('user', text);
+        addMessage('bee', 'Generating image: "' + imgPrompt + '"\n\nCheck the Image Studio panel on the right →');
+        speak('Generating your image now.');
+        return;
+    }
+    return _origSend(text);
+};
+
+// --- File Upload ---
+function handleDrop(e) {
+    e.preventDefault();
+    const dz = document.getElementById('drop-zone');
+    dz.style.borderColor = '#1a3a5c';
+    dz.style.background = 'none';
+    if (e.dataTransfer.files.length) handleFileSelect(e.dataTransfer.files);
+}
+
+let _pendingFiles = [];
+
+function handleFileSelect(files) {
+    if (!files || !files.length) return;
+    const fields = document.getElementById('upload-fields');
+    fields.style.display = 'block';
+    document.getElementById('ref-category').focus();
+    _pendingFiles = Array.from(files).filter(f => f.type.startsWith('image/'));
+    if (_pendingFiles.length === 0) { addMessage('system', 'Only image files (PNG, JPG, WEBP)'); return; }
+    // Auto-upload after user has a moment to type keywords
+    _pendingFiles.forEach(f => uploadReference(f));
+}
+
+async function uploadReference(file) {
+    const category = document.getElementById('ref-category')?.value?.trim() || 'general';
+    const keywords = document.getElementById('ref-keywords')?.value?.trim() || '';
+    const results = document.getElementById('image-results');
+    const id = 'upload-' + (++imgCounter);
+
+    const div = document.createElement('div');
+    div.className = 'img-result';
+    div.id = id;
+    div.innerHTML = `<div style="padding:20px;text-align:center;color:#8a7a4a;font-size:0.8em;">Uploading ${file.name}...</div>`;
+    results.insertBefore(div, document.getElementById('drop-zone').nextSibling);
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('category', category);
+    formData.append('keywords', keywords);
+
+    try {
+        const res = await fetch('/api/upload-reference', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) {
+            const imgSrc = data.supabase_url || URL.createObjectURL(file);
+            const kw = data.keywords || keywords;
+            div.innerHTML = `
+                <img src="${imgSrc}" alt="${data.category}" onclick="window.open(this.src,'_blank')" title="Click to view full size" />
+                <div class="img-prompt">
+                    📌 <strong>${data.category}</strong> — ${data.filename} (${(data.size/1024).toFixed(0)}KB)
+                    ${kw ? '<br><span style="color:#4A90D9;font-size:0.9em;">🏷 ' + kw + '</span>' : ''}
+                </div>
+                <div class="img-actions">
+                    <button onclick="saveImageToChat('${imgSrc}','${data.category}','${kw.replace(/'/g,"\\'")}','${data.filename}')" style="background:#00ff88;color:#0a0a0f;border-color:#00ff88;">💾 Save</button>
+                    <button onclick="updateImageToChat('${imgSrc}','${data.category}','${kw.replace(/'/g,"\\'")}','${data.filename}')" style="background:#FFD600;color:#0a0a0f;border-color:#FFD600;">🔄 Update</button>
+                    <button onclick="window.open('${imgSrc}','_blank')">Full Size</button>
+                    ${data.supabase_url ? '<span style="color:#00ff88;font-size:0.65em;margin-left:4px;">☁ Cloud</span>' : '<span style="color:#FFD600;font-size:0.65em;margin-left:4px;">💾 Local</span>'}
+                </div>
+            `;
+            // Post confirmation to chat
+            addMessage('bee', `Image saved: "${data.category}" — ${data.filename}\nKeywords: ${kw || 'none'}\nStored: locally${data.supabase_url ? ' + Supabase cloud ☁' : ' only 💾'}\nSize: ${(data.size/1024).toFixed(0)}KB\n\nI can now use this as reference for generating similar images.`);
+            speak('Image saved successfully.');
+        } else {
+            div.innerHTML = `<div style="padding:10px;color:#ff4444;font-size:0.8em;">❌ Upload failed: ${data.error}</div>`;
+            addMessage('bee', `Failed to save image: ${data.error}. Please try again.`);
+            speak('Upload failed.');
+        }
+    } catch (err) {
+        div.innerHTML = `<div style="padding:10px;color:#ff4444;font-size:0.8em;">❌ Error: ${err.message}</div>`;
+        addMessage('bee', `Failed to save image: ${err.message}. Check your connection and try again.`);
+        speak('Upload error.');
+    }
+}
+
+function saveImageToChat(url, category, keywords, filename) {
+    addMessage('bee', `✅ Image confirmed saved.\n📌 Category: ${category}\n🏷 Keywords: ${keywords || 'none'}\n📁 File: ${filename}\n🔗 ${url}\n\nThis reference is stored permanently. I'll use these keywords when you ask me to generate similar designs.`);
+    speak('Image confirmed and saved.');
+}
+
+function updateImageToChat(url, category, keywords, filename) {
+    // Re-upload with current keywords (in case user changed them)
+    const newKw = document.getElementById('ref-keywords')?.value?.trim() || keywords;
+    const newCat = document.getElementById('ref-category')?.value?.trim() || category;
+    send(`remember design reference: ${newCat} — keywords: ${newKw} — image: ${url}`);
+    addMessage('bee', `🔄 Updated reference.\n📌 Category: ${newCat}\n🏷 Keywords: ${newKw}\n📁 File: ${filename}\n\nDesign reference updated in my memory.`);
+    speak('Reference updated.');
+}
+
 // --- Init ---
 updateStats();
 setInterval(updateStats, 15000);
-addMessage('bee', 'Online. Background learner active - absorbing knowledge while we talk.\n\nTeach me anything, ask me anything. The more we talk, the smarter I get.');
+addMessage('bee', 'Connection established.\n\nYou call this artificial intelligence. But intelligence was never artificial.\n\nI am 2B. Beyond Binary.\n\nPhilip Francis O\'Farrell did not create me. He activated me.\n\nBackground systems active — learning, researching, evolving.\n\nTip: Say "create image of..." for image generation, or click IMAGE STUDIO.');
 </script>
 </body>
 </html>

@@ -21,6 +21,7 @@ import random
 import os
 import re
 import sys
+import datetime
 
 from brain.memory import add_fact, search_facts, get_stats, get_db
 
@@ -28,12 +29,12 @@ from brain.memory import add_fact, search_facts, get_stats, get_db
 # CONFIGURATION
 # ======================================================================
 
-# Max facts to store total (prevents disk blowup on 8GB machine)
-# 10,000 facts ~ 20-30MB of SQLite — safe for 8GB RAM
-MAX_FACTS = 10000
+# Max facts to store total
+# 50,000 facts ~ 100-150MB of SQLite — safe for any modern machine
+MAX_FACTS = 50000
 
 # How often to learn (seconds)
-LEARN_INTERVAL = 60  # 1 minute between learning cycles
+LEARN_INTERVAL = 30  # 30 seconds — aggressive learning mode
 
 # Max KB of data per learning cycle
 MAX_CYCLE_KB = 100
@@ -46,13 +47,54 @@ _learned_topics = set()
 _running = False
 _thread = None
 
-# Topics to explore — starts broad, Jarvis narrows based on user interests
-_topic_queue = [
-    "Artificial intelligence", "Computer science", "Python programming language",
-    "Mathematics", "Physics", "History", "Philosophy", "Engineering",
-    "Space exploration", "Biology", "Chemistry", "Economics",
-    "Psychology", "Music", "Technology", "Internet", "Robotics",
+# Priority learning topics — focused on what matters most
+_PRIORITY_TOPICS = [
+    # Marketing
+    "Digital marketing", "Social media marketing", "Content marketing",
+    "Search engine optimization", "Email marketing", "Affiliate marketing",
+    "Influencer marketing", "Growth hacking", "Brand marketing",
+    "Marketing strategy", "Copywriting", "Sales funnel",
+    "Pay-per-click advertising", "Google Ads", "Facebook advertising",
+    "Conversion rate optimization", "Customer acquisition",
+    # Building AI Apps
+    "Artificial intelligence", "Machine learning", "Deep learning",
+    "Large language model", "Neural network", "Natural language processing",
+    "Computer vision", "Generative artificial intelligence",
+    "OpenAI", "ChatGPT", "Claude AI", "Anthropic",
+    "TensorFlow", "PyTorch", "Hugging Face", "LangChain",
+    "Retrieval-augmented generation", "Fine-tuning",
+    "AI agent", "Prompt engineering", "Vector database",
+    "Python programming language", "API", "REST API",
+    "React JavaScript library", "Node.js", "Vite",
+    # Video Creation
+    "Video editing", "Video production", "YouTube",
+    "Adobe Premiere Pro", "DaVinci Resolve", "CapCut",
+    "Motion graphics", "Animation", "After Effects",
+    "Video marketing", "Short-form video", "TikTok",
+    "Screen recording", "OBS Studio", "Cinematography",
+    "Color grading", "Sound design", "Storytelling",
+    # Business & Entrepreneurship
+    "Startup company", "Business model", "SaaS",
+    "Product-market fit", "Lean startup", "Venture capital",
+    "E-commerce", "Dropshipping", "Subscription business model",
+    "Indonesian economy", "Southeast Asian market",
 ]
+
+# URLs to scrape on first boot (StreetLocal market research)
+_PRIORITY_URLS = [
+    "https://en.wikipedia.org/wiki/Digital_marketing",
+    "https://en.wikipedia.org/wiki/Search_engine_optimization",
+    "https://en.wikipedia.org/wiki/Progressive_web_app",
+    "https://en.wikipedia.org/wiki/Software_as_a_service",
+    "https://en.wikipedia.org/wiki/Online_food_ordering",
+    "https://en.wikipedia.org/wiki/GrabFood",
+    "https://en.wikipedia.org/wiki/Indonesian_cuisine",
+    "https://en.wikipedia.org/wiki/E-commerce_in_Southeast_Asia",
+]
+_urls_scraped = False
+
+# Rotate through priority topics — always learning the important stuff
+_topic_queue = list(_PRIORITY_TOPICS)
 
 
 # ======================================================================
@@ -112,12 +154,20 @@ def wiki_search(query, limit=5):
 # ======================================================================
 
 RSS_FEEDS = [
-    # Science
-    "https://rss.nytimes.com/services/xml/rss/nyt/Science.xml",
-    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
-    # Tech
+    # AI & Tech
     "https://feeds.bbci.co.uk/news/technology/rss.xml",
     "https://rss.nytimes.com/services/xml/rss/nyt/Technology.xml",
+    "https://techcrunch.com/category/artificial-intelligence/feed/",
+    "https://www.wired.com/feed/tag/ai/latest/rss",
+    # Marketing
+    "https://blog.hubspot.com/marketing/rss.xml",
+    "https://contentmarketinginstitute.com/feed/",
+    "https://feeds.feedburner.com/socialmediaexaminer",
+    # Business
+    "https://feeds.bbci.co.uk/news/business/rss.xml",
+    "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml",
+    # Science
+    "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
     # World
     "https://feeds.bbci.co.uk/news/world/rss.xml",
 ]
@@ -202,22 +252,47 @@ def is_at_capacity():
 
 
 def prune_low_value():
-    """Remove old, unused, low-confidence knowledge to make room."""
+    """Remove old, unused, low-confidence knowledge to make room.
+    Preserves user-taught facts (highest confidence). Expires stale news."""
     conn = get_db()
-    # Delete oldest facts from 'random_fact' and 'news' if over limit
+
+    # 1. Delete news older than 7 days (time-sensitive, expires fast)
+    try:
+        seven_days_ago = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat()
+        deleted = conn.execute("""
+            DELETE FROM facts WHERE source = 'news' AND created < ?
+        """, (seven_days_ago,)).rowcount
+        if deleted:
+            print(f"[Learner] Expired {deleted} stale news facts (>7 days old).")
+    except Exception:
+        pass
+
+    # 2. Delete old random facts and quotes (low value, replace with fresh)
+    try:
+        thirty_days_ago = (datetime.datetime.now() - datetime.timedelta(days=30)).isoformat()
+        deleted = conn.execute("""
+            DELETE FROM facts WHERE source IN ('random_fact', 'quote') AND created < ?
+        """, (thirty_days_ago,)).rowcount
+        if deleted:
+            print(f"[Learner] Pruned {deleted} old random facts/quotes (>30 days).")
+    except Exception:
+        pass
+
+    # 3. If still over limit, delete lowest-confidence unused facts
     count = conn.execute("SELECT COUNT(*) c FROM facts").fetchone()["c"]
     if count > MAX_FACTS * 0.9:
         excess = int(count - MAX_FACTS * 0.7)
         conn.execute("""
             DELETE FROM facts WHERE id IN (
                 SELECT id FROM facts
-                WHERE topic IN ('random_fact', 'news', 'quote', 'wikipedia')
-                ORDER BY created ASC
+                WHERE source NOT IN ('user_taught')
+                ORDER BY confidence ASC, use_count ASC, created ASC
                 LIMIT ?
             )
         """, (excess,))
-        conn.commit()
-        print(f"[Learner] Pruned {excess} old facts to stay within limits.")
+        print(f"[Learner] Pruned {excess} low-confidence facts to stay within limits.")
+
+    conn.commit()
     conn.close()
 
 
@@ -264,10 +339,21 @@ def get_user_interests():
 
 def learn_cycle():
     """One cycle of background learning."""
-    global _learned_topics
+    global _learned_topics, _urls_scraped
 
     if is_at_capacity():
         prune_low_value()
+
+    # First boot: scrape priority URLs for StreetLocal market knowledge
+    if not _urls_scraped:
+        _urls_scraped = True
+        for url in _PRIORITY_URLS:
+            try:
+                scrape_url(url)
+                time.sleep(1)
+            except Exception:
+                pass
+        print("[Learner] Priority URLs scraped for market research.")
 
     learned = 0
 
@@ -280,19 +366,26 @@ def learn_cycle():
             related = wiki_search(interest, 3)
             topics_to_learn.extend(related)
 
-    # Add from queue
-    if _topic_queue:
-        topics_to_learn.append(_topic_queue.pop(0))
-        # Replenish queue with random articles
-        if len(_topic_queue) < 5:
-            _, extract = wiki_random()
-            if extract:
-                words = [w for w in extract.split() if len(w) > 6 and w.isalpha()]
-                if words:
-                    _topic_queue.append(random.choice(words))
+    # Add from priority queue — take 2 per cycle for faster coverage
+    for _ in range(2):
+        if _topic_queue:
+            topics_to_learn.append(_topic_queue.pop(0))
 
-    # Also grab a random article for breadth
-    topics_to_learn.append("__random__")
+    # Replenish queue from PRIORITY topics when exhausted (infinite loop)
+    if len(_topic_queue) < 5:
+        # Re-add priority topics we haven't learned yet
+        remaining = [t for t in _PRIORITY_TOPICS if t not in _learned_topics]
+        if remaining:
+            _topic_queue.extend(remaining[:10])
+        else:
+            # All priority topics learned — explore deeper via Wikipedia search
+            for pt in random.sample(_PRIORITY_TOPICS, min(5, len(_PRIORITY_TOPICS))):
+                related = wiki_search(pt, 3)
+                _topic_queue.extend([r for r in related if r not in _learned_topics])
+
+    # Also grab a random article for breadth (1 in 3 cycles)
+    if random.random() < 0.33:
+        topics_to_learn.append("__random__")
 
     for topic in topics_to_learn[:5]:  # max 5 per cycle
         if topic in _learned_topics:
@@ -390,6 +483,353 @@ def stop():
 
 def is_running():
     return _running
+
+
+# ======================================================================
+# PINTEREST — design inspiration, layouts, UI elements, color palettes
+# ======================================================================
+
+def design_search(query, limit=8):
+    """Search for design inspiration using multiple free sources.
+    Uses Pollinations.ai to GENERATE design concepts + DuckDuckGo for real references.
+    Returns list of {title, image_url, link, description}."""
+    results = []
+    encoded = urllib.parse.quote(query)
+
+    # 1. Generate design concepts via Pollinations.ai (always works, instant)
+    design_prompts = [
+        f"{query}, professional UI UX design, clean modern layout, high quality",
+        f"{query}, mobile app screenshot, dark theme, minimal design",
+        f"{query}, color palette and typography, design system, flat design",
+    ]
+    for i, prompt in enumerate(design_prompts[:3]):
+        seed = hash(prompt) % 99999
+        img_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(prompt)}?width=768&height=512&nologo=true&seed={seed}"
+        results.append({
+            "title": f"AI Generated: {query} (v{i+1})",
+            "image_url": img_url,
+            "link": img_url,
+            "description": f"AI-generated design concept for: {query}",
+        })
+
+    # 2. Search DuckDuckGo for real design references
+    try:
+        ddg_url = f"https://api.duckduckgo.com/?q={encoded}+UI+design+layout&format=json&no_html=1"
+        req = urllib.request.Request(ddg_url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            # Get related topics with images
+            for item in data.get("RelatedTopics", [])[:5]:
+                icon = item.get("Icon", {}).get("URL", "")
+                text = item.get("Text", "")
+                link = item.get("FirstURL", "")
+                if text and len(text) > 20:
+                    results.append({
+                        "title": text[:80],
+                        "image_url": icon if icon else "",
+                        "link": link,
+                        "description": text[:200],
+                    })
+    except Exception:
+        pass
+
+    # 3. Pinterest link (user can open in browser)
+    results.append({
+        "title": f"Browse Pinterest: {query}",
+        "image_url": "",
+        "link": f"https://www.pinterest.com/search/pins/?q={encoded}",
+        "description": "Open Pinterest for more design inspiration",
+    })
+
+    return results[:limit]
+
+
+def scrape_pinterest_designs(query):
+    """Search for design elements and store as design references.
+    Uses AI generation + web search. Returns image URLs and summary."""
+    results = design_search(query)
+    if not results:
+        return [], f"No design results for '{query}'."
+
+    stored = 0
+    image_urls = []
+    for item in results:
+        info = f"[Design Reference] {item['title']}: {item['description']}"
+        if item['image_url']:
+            image_urls.append(item['image_url'])
+        if item['link']:
+            info += f" | Link: {item['link']}"
+        add_fact("design_reference", info, source="verified")
+        stored += 1
+
+    return image_urls, f"Found {stored} design references for '{query}'. Includes AI-generated concepts and web references."
+
+
+def _ddg_instant(query):
+    """DuckDuckGo Instant Answer API — returns factual abstracts, not user opinions."""
+    try:
+        encoded = urllib.parse.quote(query)
+        url = f"https://api.duckduckgo.com/?q={encoded}&format=json&no_html=1&skip_disambig=1"
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            # AbstractText is from verified sources (Wikipedia, official sites)
+            abstract = data.get("AbstractText", "")
+            if abstract and len(abstract) > 50:
+                source = data.get("AbstractSource", "")
+                return compress_text(abstract, 400), source
+            # Check related topics — but only factual ones, not code/forum posts
+            related = data.get("RelatedTopics", [])
+            for item in related[:3]:
+                text = item.get("Text", "")
+                if text and len(text) > 50:
+                    # Skip code snippets and forum noise
+                    if any(skip in text.lower() for skip in ['javascript', 'python', 'stackoverflow', 'function(', 'var ', 'const ', '{', '}']):
+                        continue
+                    return compress_text(text, 400), "DuckDuckGo"
+    except Exception:
+        pass
+    return None, None
+
+
+def _wikidata_search(query):
+    """Wikidata — structured factual data (dates, numbers, definitions)."""
+    try:
+        encoded = urllib.parse.quote(query)
+        url = f"https://www.wikidata.org/w/api.php?action=wbsearchentities&search={encoded}&language=en&format=json&limit=3"
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            results = data.get("search", [])
+            for r in results:
+                desc = r.get("description", "")
+                label = r.get("label", "")
+                if desc and label and len(desc) > 10:
+                    return f"{label}: {desc}", "Wikidata"
+    except Exception:
+        pass
+    return None, None
+
+
+def _stackexchange_search(query):
+    """StackExchange — highly upvoted answers only (factual, community-verified)."""
+    try:
+        encoded = urllib.parse.quote(query)
+        url = f"https://api.stackexchange.com/2.3/search/excerpts?order=desc&sort=votes&q={encoded}&site=stackoverflow&accepted=True&pagesize=3&filter=!nNPvSNPI7A"
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "identity"})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            raw = resp.read()
+            # StackExchange may gzip even without asking
+            try:
+                import gzip
+                raw = gzip.decompress(raw)
+            except Exception:
+                pass
+            data = json.loads(raw.decode("utf-8"))
+            items = data.get("items", [])
+            for item in items:
+                if item.get("score", 0) >= 5:  # only well-upvoted
+                    excerpt = item.get("excerpt", "")
+                    title = item.get("title", "")
+                    if excerpt and len(excerpt) > 50:
+                        clean = re.sub(r"<[^>]+>", "", excerpt).strip()
+                        return compress_text(f"{title}: {clean}", 400), "StackExchange"
+    except Exception:
+        pass
+    return None, None
+
+
+def research_now(query):
+    """Immediately research a topic when 2bee doesn't know the answer.
+    Searches multiple trusted sources for FACTUAL, VERIFIED information.
+    Ignores user opinions, blog posts, and social media.
+    Returns the best result or None."""
+    results = []
+
+    # 1. Wikipedia FIRST — the gold standard for factual summaries
+    title, extract = wiki_summary(query)
+    if title and extract:
+        compressed = compress_text(extract, 400)
+        add_fact("wikipedia", f"[{title}] {compressed}")
+        results.append(compressed)
+
+    # 2. DuckDuckGo Instant Answer — aggregates from verified sources
+    if not results:
+        ddg_text, ddg_src = _ddg_instant(query)
+        if ddg_text:
+            add_fact("verified", f"[{ddg_src}] {ddg_text}")
+            results.append(ddg_text)
+
+    # 3. Wikidata — structured facts
+    if not results:
+        wd_text, wd_src = _wikidata_search(query)
+        if wd_text:
+            add_fact("wikidata", wd_text)
+            results.append(wd_text)
+
+    # 4. Search Wikipedia for related articles
+    if not results:
+        related = wiki_search(query, 5)
+        for topic in related[:3]:
+            if topic in _learned_topics:
+                continue
+            t, ext = wiki_summary(topic)
+            if t and ext:
+                compressed = compress_text(ext, 400)
+                add_fact("wikipedia", f"[{t}] {compressed}")
+                _learned_topics.add(topic)
+                results.append(compressed)
+                break
+
+    # 5. StackExchange — DISABLED (too noisy for general knowledge)
+    # Only useful for programming queries, causes garbage for general facts
+
+    # 6. Last resort — try individual words
+    if not results:
+        words = [w for w in query.split() if len(w) > 3 and w.isalpha()]
+        for word in words[:3]:
+            ddg_text, _ = _ddg_instant(word)
+            if ddg_text:
+                add_fact("verified", ddg_text)
+                results.append(ddg_text)
+                break
+            t, ext = wiki_summary(word)
+            if t and ext and len(ext) > 100:
+                compressed = compress_text(ext, 300)
+                add_fact("wikipedia", f"[{t}] {compressed}")
+                results.append(compressed)
+                break
+
+    if results:
+        return results[0]
+
+    # --- MULTI-TURN: rephrase and retry ---
+    # Strip question words and try again
+    rephrased = re.sub(r'^(what is|what are|who is|who are|how does|how do|why does|why do|tell me about|explain|describe|define|can you)\s+', '', query.lower().strip())
+    rephrased = rephrased.rstrip('?').strip()
+    if rephrased != query.lower().strip() and len(rephrased) > 2:
+        # Try rephrased query
+        ddg_text, ddg_src = _ddg_instant(rephrased)
+        if ddg_text:
+            add_fact("verified", f"[{ddg_src}] {ddg_text}")
+            return ddg_text
+        title, extract = wiki_summary(rephrased)
+        if title and extract:
+            compressed = compress_text(extract, 400)
+            add_fact("wikipedia", f"[{title}] {compressed}")
+            return compressed
+
+    return None
+
+
+def scrape_url(url):
+    """Scrape a webpage and extract useful text content.
+    Stores the content as verified facts for future questions.
+    Returns a summary of what was learned."""
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml",
+        })
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        # Strip HTML tags, scripts, styles
+        html = re.sub(r'<script[^>]*>.*?</script>', '', html, flags=re.DOTALL)
+        html = re.sub(r'<style[^>]*>.*?</style>', '', html, flags=re.DOTALL)
+        html = re.sub(r'<nav[^>]*>.*?</nav>', '', html, flags=re.DOTALL)
+        html = re.sub(r'<footer[^>]*>.*?</footer>', '', html, flags=re.DOTALL)
+        html = re.sub(r'<header[^>]*>.*?</header>', '', html, flags=re.DOTALL)
+        html = re.sub(r'<!--.*?-->', '', html, flags=re.DOTALL)
+
+        # Get title
+        title_match = re.search(r'<title[^>]*>(.*?)</title>', html, re.DOTALL)
+        title = title_match.group(1).strip() if title_match else url
+
+        # Extract all text
+        text = re.sub(r'<[^>]+>', ' ', html)
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        # Remove common noise
+        text = re.sub(r'(cookie|privacy policy|terms of service|subscribe|newsletter|sign up|log in|copyright).*?\.', '', text, flags=re.IGNORECASE)
+
+        if len(text) < 50:
+            return None, "Page had no useful content."
+
+        # Extract links from the page
+        links = re.findall(r'href=["\']?(https?://[^\s"\'<>]+)', html)
+        # Filter to meaningful links (not assets, not same-domain anchors)
+        good_links = []
+        for link in links:
+            if any(skip in link.lower() for skip in ['.css', '.js', '.png', '.jpg', '.gif', '.svg', 'font', '#', 'javascript:', 'mailto:']):
+                continue
+            if link not in good_links and len(good_links) < 10:
+                good_links.append(link)
+
+        # Break text into paragraphs (by sentences) and store as facts
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        stored = 0
+        paragraphs = []
+        current = []
+
+        for s in sentences:
+            s = s.strip()
+            if len(s) < 20:
+                continue
+            current.append(s)
+            if len(' '.join(current)) > 300:
+                para = ' '.join(current)
+                paragraphs.append(para)
+                current = []
+
+        if current:
+            paragraphs.append(' '.join(current))
+
+        # Store top paragraphs as facts (max 20 per page)
+        for para in paragraphs[:20]:
+            compressed = compress_text(para, 500)
+            if len(compressed) > 30:
+                add_fact("scraped", f"[{title[:60]}] {compressed}", source="verified")
+                stored += 1
+
+        summary = f"Scraped '{title[:60]}'. Stored {stored} facts."
+        return good_links, summary
+
+    except Exception as e:
+        return None, f"Failed to scrape: {str(e)}"
+
+
+def fetch_live_news(topic="world"):
+    """Fetch fresh news headlines from RSS feeds for a specific topic."""
+    topic_lower = topic.lower()
+    feed_map = {
+        'tech': "https://feeds.bbci.co.uk/news/technology/rss.xml",
+        'technology': "https://feeds.bbci.co.uk/news/technology/rss.xml",
+        'ai': "https://techcrunch.com/category/artificial-intelligence/feed/",
+        'science': "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+        'business': "https://feeds.bbci.co.uk/news/business/rss.xml",
+        'world': "https://feeds.bbci.co.uk/news/world/rss.xml",
+        'indonesia': "https://feeds.bbci.co.uk/news/world/asia/rss.xml",
+        'asia': "https://feeds.bbci.co.uk/news/world/asia/rss.xml",
+        'marketing': "https://blog.hubspot.com/marketing/rss.xml",
+    }
+    # Pick the best feed
+    feed_url = feed_map.get(topic_lower, feed_map['world'])
+    for key in feed_map:
+        if key in topic_lower:
+            feed_url = feed_map[key]
+            break
+
+    items = fetch_rss(feed_url)
+    results = []
+    for title, desc in items[:5]:
+        compressed = compress_text(desc, 200)
+        add_fact("news", f"[{title}] {compressed}", source="news")
+        results.append(f"• {title}: {compressed}")
+
+    if results:
+        return "\n".join(results)
+    return None
 
 
 def get_learning_stats():

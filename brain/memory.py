@@ -40,9 +40,31 @@ def init():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             topic TEXT NOT NULL,
             info TEXT NOT NULL,
-            created TEXT NOT NULL
+            created TEXT NOT NULL,
+            source TEXT DEFAULT 'unknown',
+            confidence REAL DEFAULT 0.5,
+            last_used TEXT,
+            use_count INTEGER DEFAULT 0
         )
     """)
+
+    # Migrate existing tables — add new columns if missing
+    try:
+        c.execute("ALTER TABLE facts ADD COLUMN source TEXT DEFAULT 'unknown'")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE facts ADD COLUMN confidence REAL DEFAULT 0.5")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE facts ADD COLUMN last_used TEXT")
+    except Exception:
+        pass
+    try:
+        c.execute("ALTER TABLE facts ADD COLUMN use_count INTEGER DEFAULT 0")
+    except Exception:
+        pass
 
     # Full conversation log — Jarvis learns patterns from this
     c.execute("""
@@ -144,16 +166,36 @@ def get_all_responses():
 
 # --- Facts ---
 
-def add_fact(topic, info):
+# Confidence levels by source
+SOURCE_CONFIDENCE = {
+    'user_taught': 1.0,    # User told 2bee directly — highest trust
+    'wikipedia': 0.9,      # Wikipedia — verified, community-edited
+    'wikidata': 0.9,       # Wikidata — structured verified data
+    'verified': 0.85,      # DuckDuckGo instant answers — aggregated from trusted sites
+    'stackexchange': 0.75, # StackExchange — upvoted community answers
+    'news': 0.6,           # RSS news — factual but may be time-sensitive
+    'general': 0.7,        # User-taught general facts
+    'conversation': 0.4,   # Extracted from conversation — low confidence
+    'random_fact': 0.5,    # Random fact APIs
+    'quote': 0.5,          # Quotes
+    'unknown': 0.5,        # Legacy/unknown source
+}
+
+
+def add_fact(topic, info, source=None):
     conn = get_db()
     # Don't duplicate
     existing = conn.execute(
         "SELECT id FROM facts WHERE topic = ? AND info = ?", (topic.lower(), info)
     ).fetchone()
     if not existing:
+        # Auto-detect source from topic if not provided
+        if source is None:
+            source = topic.lower() if topic.lower() in SOURCE_CONFIDENCE else 'unknown'
+        confidence = SOURCE_CONFIDENCE.get(source, 0.5)
         conn.execute(
-            "INSERT INTO facts (topic, info, created) VALUES (?, ?, ?)",
-            (topic.lower(), info, datetime.now().isoformat())
+            "INSERT INTO facts (topic, info, created, source, confidence) VALUES (?, ?, ?, ?, ?)",
+            (topic.lower(), info, datetime.now().isoformat(), source, confidence)
         )
         conn.commit()
     conn.close()
@@ -161,31 +203,76 @@ def add_fact(topic, info):
 
 def search_facts(query):
     conn = get_db()
-    words = query.lower().split()
+    query_lower = query.lower().strip()
+    words = [w for w in query_lower.split() if len(w) > 2]
     results = []
+
+    # 1. Exact full-query match in info (strongest signal)
+    if len(query_lower) > 3:
+        rows = conn.execute(
+            "SELECT topic, info, source, confidence FROM facts WHERE LOWER(info) LIKE ?",
+            (f"%{query_lower}%",)
+        ).fetchall()
+        for r in rows:
+            results.append((r, 3))  # priority boost
+
+    # 2. Word-level matches — require at least 2 word hits for multi-word queries
+    word_hits = {}
     for word in words:
         rows = conn.execute(
-            "SELECT topic, info FROM facts WHERE LOWER(topic) LIKE ? OR LOWER(info) LIKE ?",
-            (f"%{word}%", f"%{word}%")
+            "SELECT topic, info, source, confidence FROM facts WHERE LOWER(info) LIKE ?",
+            (f"%{word}%",)
         ).fetchall()
-        results.extend(rows)
+        for r in rows:
+            key = (r["topic"], r["info"])
+            if key not in word_hits:
+                word_hits[key] = {"row": r, "hits": 0}
+            word_hits[key]["hits"] += 1
+
+    min_hits = min(2, len(words)) if len(words) > 1 else 1
+    for key, data in word_hits.items():
+        if data["hits"] >= min_hits:
+            results.append((data["row"], data["hits"]))
+
     conn.close()
-    # Deduplicate
+
+    # Deduplicate, score by (confidence * hit_count), sort
     seen = set()
     unique = []
-    for r in results:
+    for r, hits in results:
         key = (r["topic"], r["info"])
         if key not in seen:
             seen.add(key)
-            unique.append({"topic": r["topic"], "info": r["info"]})
+            conf = r["confidence"] if "confidence" in r.keys() else 0.5
+            unique.append({
+                "topic": r["topic"],
+                "info": r["info"],
+                "source": r["source"] if "source" in r.keys() else "unknown",
+                "confidence": conf,
+                "_score": conf * hits,
+            })
+    unique.sort(key=lambda x: x["_score"], reverse=True)
     return unique
+
+
+def mark_fact_used(topic, info):
+    """Track when a fact is used in a response — boosts its relevance."""
+    conn = get_db()
+    conn.execute(
+        "UPDATE facts SET use_count = use_count + 1, last_used = ? WHERE topic = ? AND info = ?",
+        (datetime.now().isoformat(), topic.lower(), info)
+    )
+    conn.commit()
+    conn.close()
 
 
 def get_all_facts():
     conn = get_db()
-    rows = conn.execute("SELECT topic, info FROM facts ORDER BY topic").fetchall()
+    rows = conn.execute("SELECT topic, info, source, confidence FROM facts ORDER BY confidence DESC, topic").fetchall()
     conn.close()
-    return [{"topic": r["topic"], "info": r["info"]} for r in rows]
+    return [{"topic": r["topic"], "info": r["info"],
+             "source": r["source"] if "source" in r.keys() else "unknown",
+             "confidence": r["confidence"] if "confidence" in r.keys() else 0.5} for r in rows]
 
 
 # --- Conversations ---

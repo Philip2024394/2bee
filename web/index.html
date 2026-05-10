@@ -648,6 +648,7 @@ button:hover { background: #ffd700; color: #0a0a0f; }
     <button class="fab-btn" id="img-btn" onclick="toggleImagePanel()" title="Image Studio">🎨</button>
     <button class="fab-btn" onclick="window.open('/editor.html','_blank')" title="Code Editor" style="background:#1f6feb;border-color:#1f6feb;">💻</button>
     <button class="fab-btn" onclick="openThemeLibrary()" title="Theme Library" style="background:#E91E90;border-color:#E91E90;">🎭</button>
+    <button class="fab-btn" onclick="openClonePanel()" title="Clone Website" style="background:#00ff88;border-color:#00ff88;">🌐</button>
 </div>
 
 <div id="chat">
@@ -1570,6 +1571,86 @@ async function updateDashStats() {
         document.getElementById('dash-learning').style.color = lStats.running ? '#00ff88' : '#ff4444';
         document.getElementById('dash-db-size').textContent = `DB: ${lStats.db_size_mb} MB | ${lStats.capacity_pct}% capacity`;
     } catch(e) {}
+}
+
+// --- Clone Website ---
+function openClonePanel() {
+    const chatEl = document.getElementById('chat');
+
+    const div = document.createElement('div');
+    div.className = 'msg bee';
+    div.innerHTML = `
+        <div class="label">2B</div>
+        <div style="font-size:0.85em;color:#ffd700;margin-bottom:8px;font-weight:700;">🌐 Clone Website</div>
+        <div style="font-size:0.75em;color:#8a9aaa;margin-bottom:8px;">Paste any website URL — 2B will scrape the design, analyze the layout, and store it as a reference. Great for UI inspiration and competitor analysis.</div>
+        <input type="text" id="clone-url" placeholder="https://example.com" style="width:100%;max-width:400px;background:#141921;border:1px solid #1a3a5c;color:#e0e8f0;padding:10px 12px;font-family:inherit;font-size:0.85em;border-radius:8px;outline:none;margin-bottom:8px;" onkeydown="if(event.key==='Enter')cloneWebsite()" />
+        <div style="display:flex;gap:6px;">
+            <button onclick="cloneWebsite()" style="background:#00ff88;color:#0a0a0f;border:none;border-radius:8px;padding:8px 20px;font-size:0.8em;cursor:pointer;font-weight:700;">🌐 Clone & Analyze</button>
+            <button onclick="cloneAndScreenshot()" style="background:#1a3a5c;color:#ffd700;border:none;border-radius:8px;padding:8px 16px;font-size:0.8em;cursor:pointer;">📸 Screenshot</button>
+        </div>
+    `;
+    chatEl.appendChild(div);
+    chatEl.scrollTop = chatEl.scrollHeight;
+    setTimeout(() => document.getElementById('clone-url')?.focus(), 100);
+}
+
+async function cloneWebsite() {
+    const urlInput = document.getElementById('clone-url');
+    const url = urlInput?.value?.trim();
+    if (!url || !url.startsWith('http')) {
+        addMessage('bee', 'Please enter a valid URL starting with https://');
+        return;
+    }
+
+    addMessage('user', '🌐 Clone: ' + url);
+    addMessage('bee', 'Scraping and analyzing ' + url + '...');
+
+    try {
+        // Scrape the website via 2B's scraper
+        const res = await fetch('/api/scrape', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+
+        if (data.summary) {
+            let response = '✅ ' + data.summary;
+            if (data.links && data.links.length > 0) {
+                response += '\n\nLinks found:';
+                data.links.slice(0, 5).forEach(link => {
+                    response += '\n🔗 ' + link;
+                });
+            }
+            response += '\n\nWebsite content stored in my memory. Ask me anything about it.';
+            addMessage('bee', response);
+        } else {
+            addMessage('bee', '❌ Could not scrape: ' + (data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        addMessage('bee', '❌ Clone failed: ' + e.message);
+    }
+
+    urlInput.value = '';
+}
+
+function cloneAndScreenshot() {
+    const urlInput = document.getElementById('clone-url');
+    const url = urlInput?.value?.trim();
+    if (!url || !url.startsWith('http')) {
+        addMessage('bee', 'Please enter a valid URL starting with https://');
+        return;
+    }
+
+    // Open the URL in the editor preview
+    addMessage('user', '📸 Preview: ' + url);
+    addMessage('bee', 'Opening in preview. You can also view it in the Code Editor preview panel.');
+
+    // Also scrape it
+    cloneWebsite();
+
+    // Open in new tab for visual reference
+    window.open(url, '_blank');
 }
 
 // --- Theme Library ---

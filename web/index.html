@@ -1387,46 +1387,29 @@ function generateImageInChat(prompt, model) {
     imgCounter++;
     const id = 'chat-img-' + imgCounter;
 
-    // Add loading message to chat
     const div = document.createElement('div');
     div.className = 'msg bee';
     div.id = id;
-    div.innerHTML = `<div class="label">2B</div><div style="color:#ffd700;font-size:0.85em;">Generating image...</div>`;
+    div.innerHTML = `<div class="label">2B</div><div style="color:#ffd700;font-size:0.85em;">⚡ Generating... (10-15 seconds)</div>`;
     chatEl.appendChild(div);
     chatEl.scrollTop = chatEl.scrollHeight;
-    speak('Generating.');
 
-    const doGenerate = (useModel) => {
-        if (useModel !== 'pollinations' && typeof puter !== 'undefined') {
-            puter.ai.txt2img(prompt, { model: useModel })
-                .then(imgEl => {
-                    renderChatImage(div, imgEl.src || imgEl.getAttribute('src') || '', prompt, id, imgEl);
-                })
-                .catch(() => {
-                    // Fallback to Pollinations
-                    doFallback();
-                });
-        } else {
-            doFallback();
-        }
-    };
+    // Go straight to server proxy — always works, no auth needed
+    const seed = Math.floor(Math.random() * 99999);
+    const fullPrompt = prompt + ', full complete image header to footer, NO buttons NO prices, professional product photography, modern 2026, portrait 9:16, 4k';
 
-    const doFallback = () => {
-        const seed = Math.floor(Math.random() * 99999);
-        fetch('/api/generate-image', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ prompt: prompt, seed: seed })
-        }).then(async res => {
-            if (!res.ok) throw new Error('failed');
-            const blob = await res.blob();
-            renderChatImage(div, URL.createObjectURL(blob), prompt, id, null);
-        }).catch(() => {
-            div.innerHTML = `<div class="label">2B</div><div style="color:#ff4444;font-size:0.85em;">Image generation failed. Try again or switch model.</div>`;
-        });
-    };
-
-    doGenerate(model);
+    fetch('/api/generate-image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: fullPrompt, seed: seed })
+    }).then(async res => {
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+        const blob = await res.blob();
+        if (blob.size < 1000) throw new Error('Image too small');
+        renderChatImage(div, URL.createObjectURL(blob), prompt, id, null);
+    }).catch(err => {
+        div.innerHTML = `<div class="label">2B</div><div style="color:#ff4444;font-size:0.85em;">Failed: ${err.message}. Try again.</div><button onclick="generateImageInChat('${prompt.replace(/'/g,"\\'")}','pollinations')" style="background:#ffd700;color:#0a0a0f;border:none;border-radius:6px;padding:6px 12px;font-size:0.8em;cursor:pointer;margin-top:6px;">🔄 Retry</button>`;
+    });
 }
 
 function renderChatImage(div, url, prompt, id, imgEl) {

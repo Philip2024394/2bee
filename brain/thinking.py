@@ -695,7 +695,7 @@ def handle_query(text):
                 return format_fact_response(good[:3])
 
         # For StreetLocal queries with no results, don't go to Wikipedia
-        if is_streetlocal_query:
+        if sl_search:
             name = name_or_empty()
             c = f", {name}" if name else ""
             return pick(DONT_KNOW).replace("{c}", c)
@@ -1080,15 +1080,7 @@ def process(user_input):
     elif intent == "who_am_i":
         response = handle_who_am_i()
     elif intent == "create_image":
-        # Extract the description — strip the command words
-        img_desc = re.sub(r'^(create|generate|make|draw|design|build|render|show|can you|please|i want|i need)\s+', '', text.lower(), flags=re.IGNORECASE)
-        img_desc = re.sub(r'^(me\s+)?(an?\s+)?(image|picture|photo|icon|logo|mockup|screenshot|illustration|graphic|poster|banner|thumbnail)\s+(of|on|about|for|with|showing)?\s*', '', img_desc).strip()
-        if not img_desc:
-            img_desc = 'creative design concept'
-        import urllib.parse
-        seed = random.randint(1, 99999)
-        img_url = f"https://image.pollinations.ai/prompt/{urllib.parse.quote(img_desc + ', high quality, professional, detailed')}?width=768&height=512&nologo=true&seed={seed}"
-        response = f"Here's your image:\n\n🎨 {img_url}\n\nClick to view full size. Say 'create image' again for a different version."
+        response = "Generating your image now."
     elif intent == "time":
         now = datetime.datetime.now()
         response = now.strftime("It's %I:%M %p.")

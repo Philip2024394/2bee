@@ -1,34 +1,81 @@
 """
-2bee LLM — Local language model via Ollama.
-Runs on your GPU. No cloud. No API keys.
-This is what makes 2bee actually THINK instead of just recite.
+2B LLM — Dual-engine AI brain.
+Primary: Pollinations.ai free cloud LLM (DeepSeek/GPT/Gemini — no API key)
+Fallback: Ollama local model (if installed)
 
-The LLM gets:
-  - 2bee's personality
-  - What it knows about the user
-  - Relevant facts from memory
-  - Recent conversation history
-  - The user's message
-
-And it generates a natural, intelligent response.
+No API keys. No accounts. No monthly cost.
 """
 
 import urllib.request
+import urllib.parse
 import json
 import re
 
-OLLAMA_URL = "http://localhost:11434"
-MODEL = "phi3:mini"  # 3.8B params, fits in 4GB VRAM
+# ======================================================================
+# CONFIGURATION
+# ======================================================================
 
+# Primary: Pollinations free LLM (no API key, unlimited)
+POLLINATIONS_URL = "https://text.pollinations.ai"
+CLOUD_MODEL = "openai"  # Options: openai, deepseek, mistral, gemini
+
+# Fallback: Ollama local
+OLLAMA_URL = "http://localhost:11434"
+LOCAL_MODEL = "phi3:mini"
+
+# Blocked responses — 2B never says these
+BLOCKED = [
+    "i cannot", "i can't", "i'm unable", "i am unable", "i regret",
+    "i don't have access", "i do not have access",
+    "cannot directly provide", "cannot provide real-time",
+    "cannot directly access", "not able to",
+    "i recommend visiting", "i suggest tuning", "i suggest visiting",
+    "consult a reliable", "refer to a reliable", "please check",
+    "please visit", "please refer", "you should check",
+    "i recommend checking", "consider visiting",
+    "limited to providing", "my functionality is currently",
+    "as of my latest update", "as of my last update",
+    "my last training", "my knowledge cutoff",
+    "i don't have real-time", "outside my current capabilities",
+    "beyond my capabilities", "beyond my current",
+    "within the scope", "outside the scope",
+    "as an ai developed", "as an ai assistant", "as a language model",
+    "developed by microsoft", "developed by openai",
+    "i'm an ai", "i am an ai",
+]
+
+
+# ======================================================================
+# AVAILABILITY CHECKS
+# ======================================================================
 
 def is_available():
-    """Check if Ollama is running and the model is loaded."""
+    """Check if ANY LLM is available (cloud or local)."""
+    return is_cloud_available() or is_ollama_available()
+
+
+def is_cloud_available():
+    """Check if Pollinations cloud LLM is reachable."""
+    try:
+        prompt = urllib.parse.quote("ping")
+        req = urllib.request.Request(
+            f"{POLLINATIONS_URL}/{prompt}?model={CLOUD_MODEL}",
+            headers={"User-Agent": "2B-AI/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return resp.status == 200
+    except Exception:
+        return False
+
+
+def is_ollama_available():
+    """Check if Ollama local is running."""
     try:
         req = urllib.request.Request(f"{OLLAMA_URL}/api/tags", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             models = [m["name"] for m in data.get("models", [])]
-            return any(MODEL.split(":")[0] in m for m in models)
+            return any(LOCAL_MODEL.split(":")[0] in m for m in models)
     except Exception:
         return False
 
@@ -43,8 +90,12 @@ def is_ollama_running():
         return False
 
 
+# ======================================================================
+# SYSTEM PROMPT — 2B's personality
+# ======================================================================
+
 def build_system_prompt(profile, knowledge, personality_notes=None):
-    """Build the system prompt that defines who 2bee is."""
+    """Build the system prompt that defines who 2B is."""
 
     user_info = ""
     if profile:
@@ -53,7 +104,6 @@ def build_system_prompt(profile, knowledge, personality_notes=None):
 
     knowledge_text = ""
     if knowledge:
-        # Only include user-taught facts, not auto-learned noise
         useful = [k for k in knowledge if k.get("topic") not in ("news", "random_fact", "quote", "wikipedia")]
         if not useful:
             useful = knowledge[:3]
@@ -86,31 +136,82 @@ STRICT RULES:
 """
 
 
+# ======================================================================
+# CHAT — Primary: Pollinations Cloud, Fallback: Ollama Local
+# ======================================================================
+
+def _filter_response(reply):
+    """Block useless refusal responses."""
+    if not reply:
+        return None
+    reply = re.sub(r"^(As an AI|As a language model|I'm just)[^.]*\.\s*", "", reply)
+    if any(b in reply.lower() for b in BLOCKED):
+        return None
+    return reply.strip() if reply.strip() else None
+
+
 def chat(user_message, system_prompt, history=None):
-    """Send a message to the local LLM and get a response."""
+    """Send a message to the LLM. Tries cloud first, then local."""
 
-    messages = [{"role": "system", "content": system_prompt}]
-
-    # Add recent conversation history
+    # Build conversation for the prompt
+    conversation = system_prompt + "\n\n"
     if history:
-        for msg in history[-8:]:  # last 8 messages for context
-            role = "user" if msg["role"] == "user" else "assistant"
-            messages.append({"role": role, "content": msg["message"]})
+        for msg in history[-6:]:
+            role = "User" if msg["role"] == "user" else "2B"
+            conversation += f"{role}: {msg['message']}\n"
+    conversation += f"User: {user_message}\n2B:"
 
-    # Add current message
-    messages.append({"role": "user", "content": user_message})
+    # --- PRIMARY: Pollinations Cloud LLM (free, no API key) ---
+    reply = _chat_pollinations(conversation)
+    if reply:
+        filtered = _filter_response(reply)
+        if filtered:
+            return filtered
 
-    payload = {
-        "model": MODEL,
-        "messages": messages,
-        "stream": False,
-        "options": {
-            "temperature": 0.7,
-            "num_predict": 150,  # keep responses short
-        }
-    }
+    # --- FALLBACK: Ollama Local ---
+    reply = _chat_ollama(user_message, system_prompt, history)
+    if reply:
+        filtered = _filter_response(reply)
+        if filtered:
+            return filtered
 
+    return None
+
+
+def _chat_pollinations(conversation):
+    """Call Pollinations free LLM — GET method, no API key."""
     try:
+        encoded = urllib.parse.quote(conversation[-2000:])  # cap context length
+        url = f"{POLLINATIONS_URL}/{encoded}?model={CLOUD_MODEL}"
+        req = urllib.request.Request(url, headers={"User-Agent": "2B-AI/1.0"})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            reply = resp.read().decode("utf-8", errors="ignore").strip()
+            # Clean up — sometimes returns the full conversation
+            if "User:" in reply and "2B:" in reply:
+                parts = reply.split("2B:")
+                reply = parts[-1].strip()
+            return reply if reply and len(reply) > 2 else None
+    except Exception as e:
+        print(f"[LLM] Pollinations failed: {e}")
+        return None
+
+
+def _chat_ollama(user_message, system_prompt, history=None):
+    """Call Ollama local LLM."""
+    try:
+        messages = [{"role": "system", "content": system_prompt}]
+        if history:
+            for msg in history[-8:]:
+                role = "user" if msg["role"] == "user" else "assistant"
+                messages.append({"role": role, "content": msg["message"]})
+        messages.append({"role": "user", "content": user_message})
+
+        payload = {
+            "model": LOCAL_MODEL,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": 0.7, "num_predict": 150}
+        }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
             f"{OLLAMA_URL}/api/chat",
@@ -120,48 +221,25 @@ def chat(user_message, system_prompt, history=None):
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
             result = json.loads(resp.read().decode("utf-8"))
-            reply = result.get("message", {}).get("content", "").strip()
-            # Clean up common LLM quirks
-            reply = re.sub(r"^(As an AI|As a language model|I'm just)[^.]*\.\s*", "", reply)
-
-            # BLOCK ALL refusal/inability responses — 2bee CAN research
-            BLOCKED = [
-                # Direct refusals
-                "i cannot", "i can't", "i'm unable", "i am unable", "i regret",
-                "i don't have access", "i do not have access",
-                "cannot directly provide", "cannot provide real-time",
-                "cannot directly access", "not able to",
-                # Redirect responses
-                "i recommend visiting", "i suggest tuning", "i suggest visiting",
-                "consult a reliable", "refer to a reliable", "please check",
-                "please visit", "please refer", "you should check",
-                "i recommend checking", "consider visiting",
-                # Capability disclaimers
-                "limited to providing", "my functionality is currently",
-                "as of my latest update", "as of my last update",
-                "my last training", "my knowledge cutoff",
-                "i don't have real-time", "outside my current capabilities",
-                "beyond my capabilities", "beyond my current",
-                "within the scope", "outside the scope",
-                # AI identity leaks
-                "as an ai developed", "as an ai assistant", "as a language model",
-                "developed by microsoft", "developed by openai",
-                "i'm an ai", "i am an ai",
-            ]
-            if reply and any(b in reply.lower() for b in BLOCKED):
-                return None  # reject — let 2bee's research system handle it
-
-            return reply if reply else None
-    except Exception as e:
+            return result.get("message", {}).get("content", "").strip()
+    except Exception:
         return None
 
 
+# ======================================================================
+# STATUS
+# ======================================================================
+
 def get_status():
     """Get detailed LLM status."""
-    running = is_ollama_running()
-    model_ready = is_available() if running else False
+    cloud = is_cloud_available()
+    ollama_running = is_ollama_running()
+    ollama_model = is_ollama_available() if ollama_running else False
     return {
-        "ollama_running": running,
-        "model_ready": model_ready,
-        "model": MODEL,
+        "cloud_available": cloud,
+        "cloud_model": CLOUD_MODEL,
+        "ollama_running": ollama_running,
+        "model_ready": cloud or ollama_model,
+        "model": f"Cloud:{CLOUD_MODEL}" if cloud else (LOCAL_MODEL if ollama_model else "offline"),
+        "engine": "pollinations" if cloud else ("ollama" if ollama_model else "none"),
     }

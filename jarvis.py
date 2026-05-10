@@ -232,6 +232,17 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
                 print(f"[Upload] Error: {e}")
                 self.send_json({"error": str(e)}, 500)
 
+        elif self.path == "/api/verify-saved":
+            body = self.read_body()
+            keywords = body.get("keywords", "")
+            if keywords:
+                from brain.memory import search_facts
+                results = search_facts(keywords)
+                found = [r for r in results if r.get("source") == "user_taught"]
+                self.send_json({"found": len(found), "verified": len(found) > 0})
+            else:
+                self.send_json({"found": 0, "verified": False})
+
         elif self.path == "/api/pinterest":
             body = self.read_body()
             query = body.get("query", "")

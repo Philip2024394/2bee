@@ -1269,7 +1269,7 @@ def process(user_input):
             lines.append("")
             lines.append(f"💬 Reply rules you set ({len(all_resp)}):")
             for r in all_resp[-10:]:
-                lines.append(f"  • when you say \"{r.get('trigger','?')}\" → I say \"{r.get('reply','?')}\"")
+                lines.append(f"  • when you say \"{r.get('trigger','?')}\" → I say \"{r.get('response','?')}\"")
         if not user_facts and not all_resp:
             lines.append("Nothing yet. Try teaching me with: 'remember: [fact]' or 'when I say X, you should say Y'.")
         response = "\n".join(lines)

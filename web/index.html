@@ -1426,6 +1426,7 @@ function renderChatImage(div, url, prompt, id, imgEl) {
         <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button onclick="approveImage('${id}','${safePrompt}')" style="background:#00ff88;color:#0a0a0f;border:none;border-radius:8px;padding:6px 16px;font-size:0.8em;cursor:pointer;font-weight:700;">✅ Yes — Accept</button>
             <button onclick="rejectAndRetry('${id}','${safePrompt}')" style="background:#ff4444;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:0.8em;cursor:pointer;font-weight:700;">❌ No — Retry</button>
+            <button onclick="analyzeImage('${id}')" style="background:#8E44AD;color:#fff;border:none;border-radius:8px;padding:6px 12px;font-size:0.8em;cursor:pointer;">👁 Analyze</button>
             <button onclick="downloadImage('${imgSrc}','2b-${id}.png')" style="background:#1a3a5c;color:#ffd700;border:none;border-radius:8px;padding:6px 12px;font-size:0.8em;cursor:pointer;">⬇</button>
         </div>
     `;
@@ -1436,6 +1437,29 @@ function renderChatImage(div, url, prompt, id, imgEl) {
     const chatEl = document.getElementById('chat');
     chatEl.scrollTop = chatEl.scrollHeight;
     speak('Image ready for review.');
+}
+
+async function analyzeImage(id) {
+    const div = document.getElementById(id);
+    if (!div) return;
+    const img = div.querySelector('img');
+    if (!img) { addMessage('bee', 'No image to analyze.'); return; }
+    addMessage('bee', '👁 Analyzing image...');
+    try {
+        const res = await fetch('/api/vision/analyze', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ url: img.src, question: 'Analyze this product theme image. Describe the layout, colors, products shown, text language, and rate quality 1-10. Keep under 150 words.' })
+        });
+        const data = await res.json();
+        if (data.analysis) {
+            addMessage('bee', '👁 Vision Analysis:\n\n' + data.analysis);
+            speak('Analysis complete.');
+        } else {
+            addMessage('bee', '❌ ' + (data.error || 'Vision analysis failed. Is LLaVA model loaded?'));
+        }
+    } catch(e) {
+        addMessage('bee', '❌ Vision error: ' + e.message);
+    }
 }
 
 function approveImage(id, prompt) {

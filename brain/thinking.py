@@ -115,6 +115,10 @@ def classify_intent(text):
     if any(x in lower for x in ("scrape this", "read this page", "read this link", "learn from this")):
         return "scrape_url"
 
+    # Vision / image analysis requests
+    if any(x in lower for x in ("analyze this image", "analyze image", "what do you see", "describe this image", "look at this image", "analyze this theme", "analyze theme")):
+        return "analyze_image"
+
     # Image creation requests — NEVER let LLM handle these
     if re.search(r'(create|generate|make|draw|design|build|render|show)\s+.{0,20}(image|picture|photo|icon|logo|mockup|screenshot|illustration|graphic|poster|banner|thumbnail)', lower):
         return "create_image"
@@ -1087,6 +1091,18 @@ def process(user_input):
         response = handle_show_knowledge()
     elif intent == "who_am_i":
         response = handle_who_am_i()
+    elif intent == "analyze_image":
+        # Extract URL if present
+        url_match = re.search(r'(https?://\S+)', text)
+        if url_match:
+            from brain.vision import analyze_image_url, is_available as vision_available
+            if not vision_available():
+                response = "LLaVA vision model not loaded. Run: ollama pull llava"
+            else:
+                result, err = analyze_image_url(url_match.group(1), "Analyze this image. Describe layout, colors, products, text, and rate quality 1-10.")
+                response = f"👁 Vision Analysis:\n\n{result}" if result else f"Analysis failed: {err}"
+        else:
+            response = "Send me an image URL to analyze. Example: analyze this image https://..."
     elif intent == "create_image":
         # Extract the full description — keep all modification requests intact
         img_desc = text.lower()

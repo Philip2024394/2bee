@@ -425,6 +425,30 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             result = reject_theme(body.get("id", ""), body.get("comment", ""))
             self.send_json(result)
 
+        elif self.path == "/api/vision/analyze":
+            body = self.read_body()
+            image_url = body.get("url", "")
+            image_path = body.get("path", "")
+            question = body.get("question", "Describe this image in detail.")
+            from brain.vision import analyze_image_url, analyze_image_file, is_available as vision_available
+            if not vision_available():
+                self.send_json({"error": "LLaVA vision model not loaded. Run: ollama pull llava"})
+                return
+            if image_url:
+                result, err = analyze_image_url(image_url, question)
+            elif image_path:
+                result, err = analyze_image_file(image_path, question)
+            else:
+                self.send_json({"error": "Provide url or path"}, 400)
+                return
+            if result:
+                # Store the analysis in 2B memory
+                from brain.memory import add_fact
+                add_fact("image_analysis", f"[Vision] {question}: {result[:300]}", source="verified")
+                self.send_json({"analysis": result})
+            else:
+                self.send_json({"error": err or "Analysis failed"}, 500)
+
         elif self.path == "/api/verify-saved":
             body = self.read_body()
             keywords = body.get("keywords", "")

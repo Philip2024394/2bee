@@ -51,6 +51,10 @@ _SSL_CTX.check_hostname = False
 _SSL_CTX.verify_mode = ssl.CERT_NONE
 
 
+# Cloudflare in front of api.supabase.com rejects requests with no User-Agent.
+_UA = "2bee/1.0 (+https://github.com/Philip2024394/2bee)"
+
+
 def _rest_get(path, params=None):
     """GET against PostgREST. Returns parsed JSON or raises."""
     url = SUPABASE_URL.rstrip("/") + "/rest/v1/" + path.lstrip("/")
@@ -60,6 +64,7 @@ def _rest_get(path, params=None):
         "apikey": SUPABASE_ANON_KEY,
         "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
         "Accept": "application/json",
+        "User-Agent": _UA,
     })
     with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
         return json.loads(resp.read().decode("utf-8"))
@@ -75,6 +80,7 @@ def _management_query(sql):
     req = urllib.request.Request(url, data=body, headers={
         "Authorization": f"Bearer {token}",
         "Content-Type": "application/json",
+        "User-Agent": _UA,
     }, method="POST")
     with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as resp:
         return json.loads(resp.read().decode("utf-8"))

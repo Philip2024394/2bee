@@ -18,6 +18,7 @@ import threading
 from brain import learner as web_learner
 from brain import streetlocal_connector as sl_connect
 from brain import supabase_connector as sb
+from brain import bank_import as bank
 from brain.memory import mark_fact_used
 from brain.memory import (
     add_response, find_response, get_all_responses,
@@ -181,6 +182,27 @@ def classify_intent(text):
     if lower in ("alerts", "any alerts", "any alerts?", "show alerts", "show me alerts", "what alerts"):
         return "show_alerts"
 
+    # Bank statement import — user pastes CSV after the command keyword.
+    # The header line of a CSV typically has commas/semicolons + 3+ columns,
+    # so we also auto-detect when text smells like a CSV.
+    if any(p in lower for p in ("match payments", "import bank", "process bank statement",
+                                "match bank csv", "auto match payments", "reconcile payments")):
+        return "match_bank_csv"
+    # Heuristic: the message is multiline AND has a header that looks bank-y.
+    if "\n" in text:
+        first_line = text.split("\n", 1)[0].lower()
+        bank_headers = ("tanggal", "keterangan", "debit", "kredit", "amount", "description", "transaction date", "saldo", "balance")
+        sep_count = first_line.count(";") + first_line.count(",") + first_line.count("\t")
+        if sep_count >= 2 and sum(1 for h in bank_headers if h in first_line) >= 2:
+            return "match_bank_csv"
+
+    # Audit what user has taught 2bee — answers "is she actually learning?"
+    if any(p in lower for p in ("what did you learn from me", "what have you learned from me",
+                                "what did i teach you", "show me what i taught you",
+                                "what do you remember about what i said", "did you learn that",
+                                "did you store that", "did you remember that")):
+        return "what_user_taught"
+
     # Teaching patterns (check first — most specific)
     if is_teaching_response(text):
         return "teaching_response"
@@ -320,30 +342,76 @@ def extract_topic(text):
 # ======================================================================
 
 def is_teaching_response(text):
-    patterns = [
-        r"""when i say ['"\\](.+?)['"\\],?\s*(?:you\s+)?(?:say|respond|reply|answer)\s+(?:with\s+)?['"\\](.+?)['"\\]""",
-        r"""if i say ['"\\](.+?)['"\\],?\s*(?:you\s+)?(?:say|respond|reply|answer)\s+(?:with\s+)?['"\\](.+?)['"\\]""",
+    """Detect when the user is telling 2bee what to say in response to a phrase.
+    Tolerates with-quotes and without-quotes, and natural correction patterns
+    like 'say X, not Y' and 'you should say X when I say Y'."""
+    # Quoted forms — most precise.
+    quoted_patterns = [
+        r"""when i say ['"\\](.+?)['"\\],?\s*(?:you\s+)?(?:should\s+)?(?:say|respond|reply|answer)\s+(?:with\s+)?['"\\](.+?)['"\\]""",
+        r"""if i say ['"\\](.+?)['"\\],?\s*(?:you\s+)?(?:should\s+)?(?:say|respond|reply|answer)\s+(?:with\s+)?['"\\](.+?)['"\\]""",
         r"""respond to ['"\\](.+?)['"\\] with ['"\\](.+?)['"\\]""",
+        r"""(?:you\s+should\s+)?(?:say|reply|answer|respond with)\s+['"\\](.+?)['"\\]\s+when\s+i\s+(?:say|ask|mention)\s+['"\\](.+?)['"\\]""",
     ]
-    for pattern in patterns:
+    for pattern in quoted_patterns:
         match = re.search(pattern, text, re.IGNORECASE)
         if match:
+            if "when i" in pattern.split("respond")[0]:
+                return match.group(1).strip(), match.group(2).strip()
+            elif "when i" in pattern:
+                # 'say X when I say Y' → trigger=Y, reply=X
+                return match.group(2).strip(), match.group(1).strip()
             return match.group(1).strip(), match.group(2).strip()
+
+    # "When I [say|ask] X, [you] [say|reply] Y" without quotes — most natural form, check first.
+    natural = re.search(r"""when\s+i\s+(?:say|ask|mention)\s+(.+?)\s*[,.]?\s+(?:you\s+)?(?:should\s+)?(?:say|reply|respond|answer)\s+(?:with\s+)?(.+?)(?:\.|$)""", text, re.IGNORECASE)
+    if natural:
+        return natural.group(1).strip(' "\''), natural.group(2).strip(' "\'')
+
+    # Unquoted correction: "say X, not Y" / "this is what you should say: X, not Y"
+    correction = re.search(r"""(?:this\s+is\s+what\s+you\s+(?:should|must)\s+say[:\s]+|you\s+should\s+say[:\s]+|say[:\s]+)(.+?)\s*(?:,|\.|—|--|\bnot\b)\s*(?:not\s+)?(.+?)(?:\.|$)""", text, re.IGNORECASE)
+    if correction:
+        new_reply = correction.group(1).strip(' "\'')
+        # The "not" branch is the OLD bad reply — we don't store it, just learn the new one against the last user message context.
+        # Without explicit trigger, store the new reply as a generic fact.
+        if new_reply and len(new_reply) < 200:
+            return ("__last_context__", new_reply)
+
     return None
 
 
 def is_teaching_fact(text):
     lower = text.lower().strip()
-    patterns = [
-        (r"^remember (?:that )?(.+)", "general"),
-        (r"^learn (?:this|that)[:\s]+(.+)", "general"),
+    # Explicit teach-me phrases — always treated as facts to store.
+    # All patterns tolerate ': ' or just ' ' after the keyword.
+    explicit_patterns = [
+        (r"^remember[:\s]+(?:that\s+)?(.+)", "general"),
+        (r"^learn[:\s]+(?:this|that)?[:\s]*(.+)", "general"),
         (r"^don'?t forget[:\s]+(.+)", "general"),
         (r"^keep in mind[:\s]+(.+)", "general"),
+        (r"^note(?:\s+to\s+self)?[:\s]+(.+)", "general"),
+        (r"^fact[:\s]+(.+)", "general"),
+        (r"^fyi[:\s]+(.+)", "general"),
+        (r"^store[:\s]+(?:this|that)?[:\s]*(.+)", "general"),
+        (r"^save[:\s]+(?:this|that)?[:\s]*(.+)", "general"),
+        (r"^know[:\s]+(?:this|that)?[:\s]*(.+)", "general"),
     ]
-    for pattern, topic in patterns:
+    for pattern, topic in explicit_patterns:
         match = re.match(pattern, lower)
         if match:
             return topic, match.group(1).strip().rstrip(".")
+
+    # Definitional statements — "X is Y" / "the X is Y" — extract topic + value.
+    # Skip questions, opinions, and short expressions.
+    if "?" in text or len(text) < 8 or len(text) > 240:
+        return None
+    if any(text.lower().startswith(w) for w in ("i think", "i believe", "i feel", "maybe", "probably", "i'm", "im ", "you ", "we ")):
+        return None
+    definition = re.match(r"^(?:the\s+|our\s+|my\s+)?([a-z][a-z0-9_\s]{2,40}?)\s+(?:is|are|equals?|=)\s+(.+)$", lower)
+    if definition:
+        topic = definition.group(1).strip().replace(" ", "_")
+        info = definition.group(2).strip().rstrip(".")
+        if info and len(info) > 1:
+            return topic, info
     return None
 
 
@@ -944,13 +1012,14 @@ def handle_teaching_response(text):
     result = is_teaching_response(text)
     if result:
         trigger, reply = result
+        # Special marker — the correction patterns can't always pin down the exact
+        # trigger. Store as a generic fact + warn the user we couldn't link it to
+        # a specific phrase.
+        if trigger == "__last_context__":
+            add_fact("user_correction", reply, source='user_taught')
+            return f'✓ I have updated my knowledge. Saved this as a guideline: "{reply}". Tip: for an exact reply rule, say "when I say X, you should say Y" so I can match it next time.'
         add_response(trigger, reply)
-        confirmations = [
-            f'Got it. When you say "{trigger}", I\'ll say "{reply}".',
-            f'Learned. "{trigger}" -> "{reply}".',
-            f'Stored that pattern. Try saying "{trigger}" now.',
-        ]
-        return pick(confirmations)
+        return f'✓ I have updated my knowledge. When you say "{trigger}", I will now reply with "{reply}".'
     return None
 
 
@@ -959,14 +1028,7 @@ def handle_teaching_fact(text):
     if result:
         topic, info = result
         add_fact(topic, info, source='user_taught')
-        confirmations = [
-            "Stored. I'll remember that.",
-            "Got it. That's in my memory now.",
-            "Noted. I won't forget.",
-            "Locked in. I know that now.",
-            "Filed away. What else should I know?",
-        ]
-        return pick(confirmations)
+        return f'✓ I have updated my knowledge. Stored fact: "{info}".'
     return None
 
 
@@ -976,21 +1038,7 @@ def handle_teaching_identity(text):
         key, value = result
         set_profile(key, value)
         add_fact(key, value, source='user_taught')
-        if key == "name":
-            responses = [
-                f"Nice to meet you, {value}. I won't forget.",
-                f"{value}. Got it. That's locked in.",
-                f"Alright, {value}. I'll remember you.",
-            ]
-            return pick(responses)
-        elif key == "work":
-            return pick([f"Noted - you work {value}.", f"Got it. {value}. I'll remember that."])
-        elif key == "location":
-            return pick([f"Got it - you're in {value}.", f"{value}. Stored."])
-        elif key == "age":
-            return pick([f"{value}. Got it.", f"Noted. {value} years old."])
-        else:
-            return pick([f"Stored: {key} is {value}.", f"Got it. {key}: {value}."])
+        return f'✓ I have updated my knowledge. {key.replace("_", " ").capitalize()} = "{value}".'
     return None
 
 
@@ -1190,6 +1238,41 @@ def process(user_input):
                 response = f"No matches found for '{pattern}' in the codebase."
         else:
             response = "What should I search for? Example: 'search code for THEME_PRESETS'"
+    elif intent == "match_bank_csv":
+        # Strip the command keyword if present so only the CSV is parsed.
+        csv_text = text
+        for keyword in ("match payments", "import bank", "process bank statement",
+                        "match bank csv", "auto match payments", "reconcile payments"):
+            if csv_text.lower().startswith(keyword):
+                csv_text = csv_text[len(keyword):].lstrip(":\n ")
+                break
+        if not csv_text.strip() or "\n" not in csv_text:
+            response = "Paste your bank statement CSV after the command. Example:\n\nmatch payments\nTanggal;Keterangan;Kredit\n2026-05-11;TRF SL-A7K9X3;35.000\n..."
+        else:
+            try:
+                response = bank.format_result(bank.process_csv(csv_text))
+            except Exception as e:
+                response = f"Bank import failed: {e}"
+    elif intent == "what_user_taught":
+        # Filter facts/responses to those marked as user_taught so user can verify storage.
+        all_facts = get_all_facts()
+        user_facts = [f for f in all_facts if f.get("source") == "user_taught"]
+        all_resp = get_all_responses()
+        lines = []
+        if user_facts:
+            lines.append(f"📚 Facts you taught me ({len(user_facts)}):")
+            for f in user_facts[-15:]:
+                topic = f.get("topic", "general")
+                info = f.get("info", "")
+                lines.append(f"  • {topic}: {info}")
+        if all_resp:
+            lines.append("")
+            lines.append(f"💬 Reply rules you set ({len(all_resp)}):")
+            for r in all_resp[-10:]:
+                lines.append(f"  • when you say \"{r.get('trigger','?')}\" → I say \"{r.get('reply','?')}\"")
+        if not user_facts and not all_resp:
+            lines.append("Nothing yet. Try teaching me with: 'remember: [fact]' or 'when I say X, you should say Y'.")
+        response = "\n".join(lines)
     elif intent == "pending_payments":
         try:
             rows = sb.list_pending_payments()

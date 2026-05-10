@@ -362,6 +362,14 @@ def main():
     except Exception as e:
         print(f"  StreetLocal project: sync failed ({e})")
 
+    # Load plugins (GitHub repos)
+    try:
+        from brain.plugin_loader import load_all_plugins
+        plugin_count = load_all_plugins()
+        print(f"  Plugins: {plugin_count} facts loaded from GitHub repos")
+    except Exception as e:
+        print(f"  Plugins: failed ({e})")
+
     # Start background learner
     learner.start()
     print(f"  Background learner: ON (Marketing, AI Apps, Video Creation — 30s cycles)")

@@ -196,6 +196,11 @@ def classify_intent(text):
         if sep_count >= 2 and sum(1 for h in bank_headers if h in first_line) >= 2:
             return "match_bank_csv"
 
+    # User addresses 2bee by name — typed "2b" / "2bee" / "hey 2b" / "yo 2bee".
+    # 2bee should respond with a time-based greeting + a quick news check.
+    if re.match(r"^(hey\s+|hi\s+|yo\s+|hello\s+)?2\s*-?\s*b(ee)?[,\.\!\?\s]*$", lower):
+        return "address_2bee"
+
     # Audit what user has taught 2bee — answers "is she actually learning?"
     if any(p in lower for p in ("what did you learn from me", "what have you learned from me",
                                 "what did i teach you", "show me what i taught you",
@@ -1283,6 +1288,34 @@ def process(user_input):
                 response = f"No matches found for '{pattern}' in the codebase."
         else:
             response = "What should I search for? Example: 'search code for THEME_PRESETS'"
+    elif intent == "address_2bee":
+        # Time-based greeting.
+        now = datetime.datetime.now()
+        h = now.hour
+        if 5 <= h < 12:
+            greeting = "Good morning"
+        elif 12 <= h < 17:
+            greeting = "Good afternoon"
+        elif 17 <= h < 22:
+            greeting = "Good evening"
+        else:
+            greeting = "Good evening"
+        ampm = now.strftime("%I:%M %p").lstrip("0")
+        # Quick news check — try the live news fetcher; gracefully degrade.
+        news_line = "There is no major news of today."
+        try:
+            news = web_learner.fetch_live_news("world")
+            if news:
+                # Take the first headline only, trim long text.
+                first = news.strip().split("\n")[0]
+                first = re.sub(r"^\W+", "", first)[:200]
+                if first:
+                    news_line = f"Breaking: {first}"
+        except Exception:
+            pass
+        name = name_or_empty()
+        addressed = f", {name.title()}" if name else ""
+        response = f"{greeting}{addressed}. It's {ampm}.\n{news_line}\nWhere shall we kick off?"
     elif intent == "match_bank_csv":
         # Strip the command keyword if present so only the CSV is parsed.
         csv_text = text

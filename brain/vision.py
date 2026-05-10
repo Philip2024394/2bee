@@ -10,19 +10,28 @@ import os
 
 
 OLLAMA_URL = "http://localhost:11434"
-VISION_MODEL = "llava"
+# MiniCPM-V is more accurate than LLaVA — beats GPT-4o on vision benchmarks
+VISION_MODELS = ["minicpm-v", "llava"]  # Try best first, fallback to LLaVA
 
 
-def is_available():
-    """Check if LLaVA vision model is loaded in Ollama."""
+def _get_vision_model():
+    """Get the best available vision model."""
     try:
         req = urllib.request.Request(f"{OLLAMA_URL}/api/tags", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            models = [m["name"] for m in data.get("models", [])]
-            return any("llava" in m for m in models)
+            installed = [m["name"] for m in data.get("models", [])]
+            for model in VISION_MODELS:
+                if any(model in m for m in installed):
+                    return model
     except Exception:
-        return False
+        pass
+    return None
+
+
+def is_available():
+    """Check if any vision model is loaded in Ollama."""
+    return _get_vision_model() is not None
 
 
 def analyze_image_file(filepath, question="Describe this image in detail."):
@@ -54,10 +63,13 @@ def analyze_image_bytes(img_bytes, question="Describe this image in detail."):
 
 
 def _call_llava(img_base64, question):
-    """Call Ollama LLaVA with an image."""
+    """Call Ollama vision model with an image."""
+    model = _get_vision_model()
+    if not model:
+        return None, "No vision model installed. Run: ollama pull minicpm-v"
     try:
         payload = {
-            "model": VISION_MODEL,
+            "model": model,
             "messages": [
                 {
                     "role": "user",

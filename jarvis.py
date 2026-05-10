@@ -277,11 +277,40 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 import urllib.request as urlreq
                 import urllib.parse
-                encoded = urllib.parse.quote(prompt[:4000])
-                url = f"https://text.pollinations.ai/{encoded}?model=openai"
-                req = urlreq.Request(url, headers={"User-Agent": "2B-AI/1.0"})
-                with urlreq.urlopen(req, timeout=30) as resp:
-                    reply = resp.read().decode("utf-8", errors="ignore").strip()
+
+                reply = None
+
+                # PRIMARY: Ollama local (always available, instant)
+                try:
+                    ollama_data = json.dumps({
+                        "model": "phi3:mini",
+                        "messages": [
+                            {"role": "system", "content": prompt[:2000].split("User:")[0]},
+                            {"role": "user", "content": user_msg or prompt.split("User:")[-1] if "User:" in prompt else prompt[-500:]}
+                        ],
+                        "stream": False,
+                        "options": {"temperature": 0.7, "num_predict": 300}
+                    }).encode("utf-8")
+                    ollama_req = urlreq.Request("http://localhost:11434/api/chat", data=ollama_data, headers={"Content-Type": "application/json"}, method="POST")
+                    with urlreq.urlopen(ollama_req, timeout=60) as ollama_resp:
+                        result = json.loads(ollama_resp.read().decode("utf-8"))
+                        reply = result.get("message", {}).get("content", "").strip()
+                except Exception:
+                    pass
+
+                # FALLBACK: Pollinations cloud
+                if not reply:
+                    try:
+                        encoded = urllib.parse.quote(prompt[:4000])
+                        url = f"https://text.pollinations.ai/{encoded}?model=openai"
+                        req = urlreq.Request(url, headers={"User-Agent": "2B-AI/1.0"})
+                        with urlreq.urlopen(req, timeout=30) as resp:
+                            reply = resp.read().decode("utf-8", errors="ignore").strip()
+                    except Exception:
+                        pass
+
+                if not reply:
+                    reply = "AI engines temporarily unavailable. Try again in a moment."
 
                     # --- LEARN FROM EVERY EXCHANGE ---
                     from brain.memory import save_message, add_fact

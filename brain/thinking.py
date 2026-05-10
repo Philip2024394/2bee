@@ -17,6 +17,7 @@ import datetime
 import threading
 from brain import learner as web_learner
 from brain import streetlocal_connector as sl_connect
+from brain import supabase_connector as sb
 from brain.memory import mark_fact_used
 from brain.memory import (
     add_response, find_response, get_all_responses,
@@ -157,6 +158,28 @@ def classify_intent(text):
         return "project_stats"
     if any(x in lower for x in ("search code for", "find in code", "search the code")):
         return "search_code"
+
+    # ── Live Supabase queries — admin / business ops via 2bee chat ──
+    # Approve/reject by reference code (must come before generic 'pending'
+    # match below since the user typically says "approve SL-XXXXXX").
+    if re.search(r'\b(approve|verify|activate)\b.*\bsl-[a-z0-9]{4,}\b', lower):
+        return "approve_payment"
+    if re.search(r'\b(reject|deny|decline)\b.*\bsl-[a-z0-9]{4,}\b', lower):
+        return "reject_payment"
+    if re.search(r'\bsl-[a-z0-9]{4,}\b', lower) and any(w in lower for w in ("look up", "find", "show", "lookup", "where is")):
+        return "find_payment_by_ref"
+    if any(x in lower for x in ("pending payments", "show pending", "show paid payments",
+                                "pending verification", "payments to approve", "approvals queue",
+                                "show overdue payments")):
+        return "pending_payments"
+    if any(x in lower for x in ("revenue this month", "monthly revenue", "show revenue",
+                                "mrr", "monthly recurring", "show me revenue", "revenue breakdown by plan")):
+        return "revenue_report"
+    if any(x in lower for x in ("vendor health", "health report", "active users", "subscription health",
+                                "churn rate", "active vs pending")):
+        return "vendor_health"
+    if lower in ("alerts", "any alerts", "any alerts?", "show alerts", "show me alerts", "what alerts"):
+        return "show_alerts"
 
     # Teaching patterns (check first — most specific)
     if is_teaching_response(text):
@@ -1167,6 +1190,79 @@ def process(user_input):
                 response = f"No matches found for '{pattern}' in the codebase."
         else:
             response = "What should I search for? Example: 'search code for THEME_PRESETS'"
+    elif intent == "pending_payments":
+        try:
+            rows = sb.list_pending_payments()
+            response = sb.format_pending_list(rows)
+        except Exception as e:
+            response = f"Couldn't reach Supabase: {e}"
+    elif intent == "revenue_report":
+        try:
+            response = sb.format_revenue(sb.get_health_snapshot())
+        except Exception as e:
+            response = f"Couldn't reach Supabase: {e}"
+    elif intent == "vendor_health":
+        try:
+            response = sb.format_health(sb.get_health_snapshot())
+        except Exception as e:
+            response = f"Couldn't reach Supabase: {e}"
+    elif intent == "show_alerts":
+        try:
+            response = sb.format_alerts(sb.get_alerts())
+        except Exception as e:
+            response = f"Couldn't reach Supabase: {e}"
+    elif intent == "find_payment_by_ref":
+        ref_match = re.search(r'(sl-[a-z0-9]{4,})', text.lower())
+        if ref_match:
+            ref = ref_match.group(1).upper()
+            try:
+                row = sb.find_by_reference(ref)
+                if row:
+                    lines = [
+                        f"Found {ref}:",
+                        f"  Business: {row.get('business_name', '?')}",
+                        f"  Status: {row.get('status', '?')}",
+                        f"  Plan: {row.get('app_tier', '?')} ({row.get('billing_cycle', 'monthly')})",
+                        f"  Price: {row.get('price', '?')}",
+                        f"  WhatsApp: {row.get('whatsapp', '?')}",
+                        f"  Proof: {'uploaded' if row.get('payment_proof_url') else 'not yet'}",
+                        f"  Expires: {row.get('expires_at', '—')}",
+                    ]
+                    response = "\n".join(lines)
+                else:
+                    response = f"No registration found with reference {ref}."
+            except Exception as e:
+                response = f"Couldn't reach Supabase: {e}"
+        else:
+            response = "Give me a reference code, like 'find SL-A7K9X3'."
+    elif intent == "approve_payment":
+        ref_match = re.search(r'(sl-[a-z0-9]{4,})', text.lower())
+        if ref_match:
+            ref = ref_match.group(1).upper()
+            try:
+                row = sb.approve_payment(ref)
+                if row:
+                    response = f"✓ Approved {ref}: {row.get('business_name', '?')} is now active until {row.get('expires_at', '?')}"
+                else:
+                    response = f"Couldn't approve {ref}. Either the code doesn't exist or it's not in pending_verification status."
+            except Exception as e:
+                response = f"Approval failed: {e}"
+        else:
+            response = "Give me a reference code, like 'approve SL-A7K9X3'."
+    elif intent == "reject_payment":
+        ref_match = re.search(r'(sl-[a-z0-9]{4,})', text.lower())
+        if ref_match:
+            ref = ref_match.group(1).upper()
+            try:
+                row = sb.reject_payment(ref)
+                if row:
+                    response = f"✗ Rejected {ref}: {row.get('business_name', '?')} marked deactivated."
+                else:
+                    response = f"Couldn't reject {ref}. Reference not found."
+            except Exception as e:
+                response = f"Rejection failed: {e}"
+        else:
+            response = "Give me a reference code, like 'reject SL-A7K9X3'."
     elif intent == "generate_themes":
         # Extract category
         cat_match = re.search(r'themes?\s+(?:for\s+)?(\w+)', text.lower())

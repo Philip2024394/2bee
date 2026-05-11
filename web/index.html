@@ -646,6 +646,19 @@ button:hover { background: #ffd700; color: #0a0a0f; }
                 <div id="leads-scrape-result" style="margin-top:10px;font-size:0.78em;color:#cdd5e0;"></div>
             </div>
             <div class="dash-section">
+                <div class="dash-section-title">Bulk enrichment + export</div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                    <button onclick="enrichAllLeads()" id="enrich-all-btn" style="background:#00ff88;color:#0a0a0f;border:none;padding:8px 12px;border-radius:6px;font-size:0.8em;cursor:pointer;font-weight:800;">🔍 Enrich All (scrape websites + IG)</button>
+                    <a href="/api/admin/leads/export?format=csv" target="_blank" style="background:#3498db;color:#fff;text-decoration:none;padding:8px 12px;border-radius:6px;font-size:0.8em;font-weight:800;">📊 Excel/CSV (all)</a>
+                    <a href="/api/admin/leads/export?format=csv-with-email" target="_blank" style="background:#3498db;color:#fff;text-decoration:none;padding:8px 12px;border-radius:6px;font-size:0.8em;font-weight:800;">📊 CSV (with email)</a>
+                    <a href="/api/admin/leads/export?format=csv-with-phone" target="_blank" style="background:#3498db;color:#fff;text-decoration:none;padding:8px 12px;border-radius:6px;font-size:0.8em;font-weight:800;">📊 CSV (with phone)</a>
+                    <a href="/api/admin/leads/export?format=emails-newline" target="_blank" style="background:#ffd700;color:#0a0a0f;text-decoration:none;padding:8px 12px;border-radius:6px;font-size:0.8em;font-weight:800;">📧 Emails (newline)</a>
+                    <a href="/api/admin/leads/export?format=emails-comma" target="_blank" style="background:#ffd700;color:#0a0a0f;text-decoration:none;padding:8px 12px;border-radius:6px;font-size:0.8em;font-weight:800;">📧 Emails (comma)</a>
+                    <a href="/api/admin/leads/export?format=emails-semicolon" target="_blank" style="background:#ffd700;color:#0a0a0f;text-decoration:none;padding:8px 12px;border-radius:6px;font-size:0.8em;font-weight:800;">📧 Emails (semicolon)</a>
+                </div>
+                <div id="enrich-result" style="margin-top:8px;font-size:0.78em;color:#cdd5e0;"></div>
+            </div>
+            <div class="dash-section">
                 <div class="dash-section-title">Pipeline</div>
                 <div id="leads-pipeline" style="font-size:0.78em;color:#cdd5e0;">Loading…</div>
             </div>
@@ -1812,6 +1825,38 @@ async function openLeadWhatsApp(leadId) {
         window.open(data.url, '_blank');
         loadLeads(); // Refresh — status auto-bumps from 'new' to 'contacted'.
     } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function enrichAllLeads() {
+    const btn = document.getElementById('enrich-all-btn');
+    const result = document.getElementById('enrich-result');
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = '⏳ Scraping websites + IG bios (real, no fake progress)…';
+    result.innerHTML = '<span style="color:#ffd700;">Running enrichment. Real scraping in progress — this may take 1-3 minutes per 50 leads.</span>';
+    try {
+        const res = await fetch('/api/admin/leads/enrich-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ limit: 200 }),
+        });
+        const data = await res.json();
+        if (data.error) {
+            result.innerHTML = '<span style="color:#ff4444;">⚠️ ' + data.error + '</span>';
+        } else {
+            result.innerHTML = `<div style="color:#00ff88;font-weight:700;">✓ Done. Real numbers:</div>
+                <div style="color:#cdd5e0;margin-top:4px;">Scanned: ${data.scanned} leads</div>
+                <div style="color:#00ff88;">Enriched: ${data.enriched}</div>
+                <div style="color:#cdd5e0;">  → New phones: ${data.new_phones}, new WAs: ${data.new_whatsapps}, new emails: ${data.new_emails}</div>
+                <div style="color:#8a9aaa;">No public contact data found: ${data.no_data_found}</div>
+                ${data.errors ? `<div style="color:#ff4444;">Errors: ${data.errors}</div>` : ''}`;
+            loadLeads();
+        }
+    } catch (e) {
+        result.innerHTML = '<span style="color:#ff4444;">⚠️ ' + e.message + '</span>';
+    }
+    btn.disabled = false;
+    btn.textContent = orig;
 }
 
 async function scrapeLeadsAndImport() {

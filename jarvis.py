@@ -598,6 +598,32 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
 
+        elif self.path == "/api/admin/leads/enrich-all":
+            # POST { limit? } → run public-source enrichment across phoneless leads.
+            from brain import enrichment
+            body = self.read_body()
+            try:
+                summary = enrichment.enrich_all_phoneless(limit=int(body.get("limit", 200)))
+                self.send_json(summary)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/leads/enrich":
+            # POST { lead_id } → enrich one lead (dry_run=false).
+            from brain import enrichment
+            from brain import supabase_connector as sb
+            body = self.read_body()
+            try:
+                rows = sb._rest_get("outreach_leads", {"select": "*", "id": f"eq.{body.get('lead_id')}"})
+                if not rows:
+                    self.send_json({"error": "lead not found"}, 404); return
+                result = enrichment.enrich_lead(rows[0])
+                if result["update"]:
+                    enrichment._apply_update(rows[0]["id"], result["update"])
+                self.send_json(result)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         elif self.path == "/api/admin/leads/update":
             # POST { lead_id, phone?, whatsapp?, email?, notes? } → enrich contact info.
             from brain import supabase_connector as sb
@@ -706,6 +732,42 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             from brain import supabase_connector as sb
             try:
                 self.send_json({"suggestions": sb.generate_suggestions()})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path.startswith("/api/admin/leads/export"):
+            # /api/admin/leads/export?format=csv|emails-newline|emails-comma|emails-semicolon
+            from brain import enrichment
+            import urllib.parse as _up
+            qs = _up.parse_qs(_up.urlparse(self.path).query)
+            fmt = (qs.get("format") or ["csv"])[0]
+            try:
+                if fmt == "csv":
+                    body = enrichment.export_leads_csv()
+                    fname = "leads.csv"
+                    ctype = "text/csv; charset=utf-8"
+                elif fmt == "csv-with-email":
+                    body = enrichment.export_leads_csv(only_with_email=True)
+                    fname = "leads-with-email.csv"
+                    ctype = "text/csv; charset=utf-8"
+                elif fmt == "csv-with-phone":
+                    body = enrichment.export_leads_csv(only_with_phone=True)
+                    fname = "leads-with-phone.csv"
+                    ctype = "text/csv; charset=utf-8"
+                elif fmt.startswith("emails-"):
+                    sub = fmt.split("-", 1)[1]
+                    body = enrichment.export_emails_only(format=sub)
+                    fname = f"emails-{sub}.txt"
+                    ctype = "text/plain; charset=utf-8"
+                else:
+                    self.send_json({"error": "unknown format"}, 400); return
+                data = body.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", ctype)
+                self.send_header("Content-Disposition", f'attachment; filename="{fname}"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
 

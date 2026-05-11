@@ -45,9 +45,14 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://fjvafjkzvygkhiwjuvla.supa
 SUPABASE_KEY = os.environ.get("SUPABASE_ANON_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqdmFmamt6dnlna2hpd2p1dmxhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUxMDk0NDEsImV4cCI6MjA5MDY4NTQ0MX0.UoXfKznY9gAEqZDSTegDjIfYAeAeFg6Eh1D40Hoe2KM")
 
 # --- Rate Limiting ---
+# Admin/local use has effectively no limit. Loopback IPs always pass.
+# Remote IPs (if you ever expose this) get a high ceiling, not a low one.
 _rate_limits = defaultdict(list)
-RATE_LIMIT = 60  # max requests per minute per IP
+RATE_LIMIT = 6000  # per minute per IP (was 60). Loopback bypasses entirely.
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 def check_rate_limit(ip):
+    if ip in _LOOPBACK:
+        return True
     now = time.time()
     _rate_limits[ip] = [t for t in _rate_limits[ip] if now - t < 60]
     if len(_rate_limits[ip]) >= RATE_LIMIT:

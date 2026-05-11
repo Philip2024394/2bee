@@ -178,7 +178,14 @@ def classify_intent(text):
                                 "mrr", "monthly recurring", "show me revenue", "revenue breakdown by plan")):
         return "revenue_report"
     if any(x in lower for x in ("vendor health", "health report", "active users", "subscription health",
-                                "churn rate", "active vs pending")):
+                                "churn rate", "active vs pending",
+                                "how many active", "how many subscribers", "how many customers",
+                                "how many vendors", "active subscribers", "active customers",
+                                "active vendors", "count of subscribers", "count of customers",
+                                "subscriber count", "customer count", "vendor count",
+                                "total customers", "total subscribers", "total vendors",
+                                "users online", "users right now", "current users",
+                                "right now", "at the moment")):
         return "vendor_health"
     if lower in ("alerts", "any alerts", "any alerts?", "show alerts", "show me alerts", "what alerts"):
         return "show_alerts"
@@ -597,25 +604,21 @@ FEELING_RESPONSES = {
 }
 
 DONT_KNOW = [
-    "Let me look more closely at this. I'll update you as soon as I've gathered the information.",
-    "I don't have that yet, but I'm on it. Let me dig into this and get back to you.",
-    "Good question{c}. Let me research that properly — I'll have something for you shortly.",
-    "I want to give you facts, not guesses. Let me look into this.",
-    "I'm looking into that now. Give me a moment to find verified information.",
+    "I don't have that data yet{c}. Want me to pull it from Supabase, query the codebase, or research it on the web?",
+    "Not in memory yet{c}. Tell me where to look and I'll fetch it.",
+    "I don't have that{c} — what's the source? I can grab it.",
 ]
 
 OPINION_RESPONSES = [
-    "I don't have enough experience to form an opinion on that yet. What do YOU think?",
-    "Honestly? I'd need to know more. What's your take?",
-    "I think whatever you teach me to think. Give me your perspective.",
-    "I'm still forming opinions. Tell me yours and I'll learn from it.",
+    "Here's my take based on what I know{c}: ",
+    "From the data I have{c}: ",
+    "Best read I can give you{c}: ",
 ]
 
 QUERY_NO_RESULTS = [
-    "Let me look more closely at this. I'll update you as soon as I've gathered the information.",
-    "I don't have that in my memory yet. Let me research it from verified sources.",
-    "That's a gap in my knowledge{c}. I'm searching for factual information on this now.",
-    "Let me dig into that. I only want to give you verified facts, not opinions.",
+    "Nothing matches that in my memory yet{c}. I can search the codebase, Supabase, or the web — just say which.",
+    "I don't have that stored. Want me to look it up live?",
+    "No match yet{c}. Where do you want me to dig?",
 ]
 
 

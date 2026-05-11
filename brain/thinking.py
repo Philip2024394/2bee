@@ -21,6 +21,7 @@ from brain import streetlocal_connector as sl_connect
 from brain import supabase_connector as sb
 from brain import bank_import as bank
 from brain import outreach
+from brain import enrichment
 from brain.memory import mark_fact_used
 from brain.memory import (
     add_response, find_response, get_all_responses,
@@ -112,6 +113,20 @@ def classify_intent(text):
     feeling, statement, teaching_response, teaching_fact, teaching_identity,
     scrape_url, command, or unknown."""
     lower = text.lower().strip()
+
+    # EXPLICIT TEACHING PREFIX — must win over every command matcher below so a fact like
+    # "remember: I can enrich leads with the command 'enrich leads'" gets STORED, not EXECUTED.
+    teaching_prefix = re.match(
+        r"^(remember|learn(?:\s+this)?|don'?t\s+forget|keep\s+in\s+mind|note(?:\s+to\s+self)?|fact|fyi|store(?:\s+this)?|save(?:\s+this)?|know(?:\s+this)?)[:\s]+",
+        lower
+    )
+    if teaching_prefix:
+        if is_teaching_fact(lower):
+            return "teaching_fact"
+    # Explicit response-teaching pattern ("when I say X, you say Y" / "respond to X with Y")
+    if re.search(r"\bwhen\s+i\s+(?:say|ask|mention)\b", lower) or re.search(r"\brespond\s+to\b.*\bwith\b", lower):
+        if is_teaching_response(text):
+            return "teaching_response"
 
     # URL detection — user pasted a link or said "scrape/read this URL"
     if re.search(r'https?://\S+', text):
@@ -224,6 +239,21 @@ def classify_intent(text):
     # Import the last found list
     if any(x in lower for x in ("import leads", "save leads", "add to crm", "import to crm")):
         return "import_leads"
+    # Enrich phoneless leads — visit website, IG, OSM extras to fill phone+email
+    if any(x in lower for x in ("enrich leads", "enrich all leads", "enrich phoneless",
+                                 "fill missing contacts", "scrape contacts", "find phones")):
+        return "enrich_leads"
+    # Export emails for bulk-list use
+    if re.match(r"^(export|dump|give me)\s+(all\s+)?emails?(\s+(as\s+)?(newline|comma|semicolon|list))?$", lower):
+        return "export_emails"
+    # Export full leads CSV
+    if any(x in lower for x in ("export leads", "export csv", "download leads", "leads csv",
+                                 "export lead list")):
+        return "export_csv"
+    # Send WhatsApp to a specific lead by name fragment
+    m_wa = re.match(r"^(?:send\s+(?:wa|whatsapp)|wa|message)\s+(?:to\s+)?(.+?)$", lower)
+    if m_wa and len(m_wa.group(1)) >= 3:
+        return "lead_send_whatsapp"
 
     # User addresses 2bee by name — typed "2b" / "2bee" / "hey 2b" / "yo 2bee".
     # 2bee should respond with a time-based greeting + a quick news check.
@@ -1241,48 +1271,55 @@ def handle_who_am_i():
 # ======================================================================
 
 def think_with_llm(text, intent):
-    """Use the local LLM to generate a natural response, fed with 2B's memory."""
+    """Use the local LLM to generate a natural response, fed with 2B's memory.
 
-    # Gather context for the LLM
+    Aggressive fact retrieval: searches by full question text AND by every
+    extracted topic word (3+ chars), then ranks user_taught facts above all
+    others. Top 10 facts get injected into the system prompt so the LLM can
+    actually USE the knowledge base when answering."""
+
     profile = get_profile()
     topics = extract_topic(text)
 
-    # Pull relevant knowledge — only strong matches, skip noise
     relevant_facts = []
     seen = set()
-    for word in topics:
-        if len(word) > 3:  # skip short words
-            results = search_facts(word)
-            for r in results:
-                key = r["info"][:60]
-                if key not in seen and r["topic"] not in ("news", "random_fact", "quote"):
+
+    # 1. Full-text search — substring match on the whole question
+    results = search_facts(text)
+    for r in results:
+        key = r["info"][:60]
+        if key in seen or r["topic"] in ("news", "random_fact", "quote"):
+            continue
+        seen.add(key)
+        relevant_facts.append(r)
+        if len(relevant_facts) >= 10:
+            break
+
+    # 2. Topic-word search — fill remaining slots
+    if len(relevant_facts) < 10:
+        for word in topics:
+            if len(word) >= 3:  # was > 3 — admin/api/wcag/etc. should count
+                results = search_facts(word)
+                for r in results:
+                    key = r["info"][:60]
+                    if key in seen or r["topic"] in ("news", "random_fact", "quote"):
+                        continue
                     seen.add(key)
                     relevant_facts.append(r)
-    # If no curated facts, allow news/wikipedia but limit heavily
-    if not relevant_facts:
-        for word in topics:
-            if len(word) > 3:
-                results = search_facts(word)
-                for r in results[:2]:
-                    key = r["info"][:60]
-                    if key not in seen:
-                        seen.add(key)
-                        relevant_facts.append(r)
-    relevant_facts = relevant_facts[:5]  # strict cap
+                    if len(relevant_facts) >= 10:
+                        break
+            if len(relevant_facts) >= 10:
+                break
 
-    # Build system prompt with 2B's personality + only clean knowledge
-    clean_facts = [f for f in relevant_facts if f.get("topic") not in ("news", "random_fact", "quote")]
-    system_prompt = llm.build_system_prompt(profile, clean_facts)
+    # 3. Rank user_taught above everything else
+    user_taught = [f for f in relevant_facts if f.get("source") == "user_taught"]
+    other = [f for f in relevant_facts if f.get("source") != "user_taught"]
+    relevant_facts = (user_taught + other)[:10]
 
-    # Get conversation history
+    # Build system prompt with 2B's personality + injected knowledge
+    system_prompt = llm.build_system_prompt(profile, relevant_facts)
     history = get_recent(8)
-
-    # Only add facts as context if they're genuinely relevant (not random noise)
-    augmented_message = text
-
-    # Call the LLM
-    response = llm.chat(augmented_message, system_prompt, history)
-    return response
+    return llm.chat(text, system_prompt, history)
 
 
 # ======================================================================
@@ -1469,6 +1506,71 @@ def process(user_input):
                 response = "\n".join(lines)
         except Exception as e:
             response = f"Couldn't fetch leads: {e}"
+    elif intent == "enrich_leads":
+        try:
+            stats = enrichment.enrich_all_phoneless(limit=200)
+            response = (
+                f"✓ Enrichment scan complete.\n"
+                f"  • Scanned: {stats['scanned']} leads with missing phone/whatsapp\n"
+                f"  • Enriched: {stats['enriched']} (new emails: {stats['new_emails']}, "
+                f"phones: {stats['new_phones']}, whatsapps: {stats['new_whatsapps']})\n"
+                f"  • No public contacts found: {stats['no_data_found']}\n"
+                f"  • Errors: {stats['errors']}"
+            )
+        except Exception as e:
+            response = f"Enrichment failed: {e}"
+    elif intent == "export_emails":
+        m_fmt = re.search(r"(newline|comma|semicolon|list)", text.lower())
+        fmt = m_fmt.group(1) if m_fmt else "newline"
+        if fmt == "list":
+            fmt = "newline"
+        try:
+            body = enrichment.export_emails_only(format=fmt)
+            count = body.count("@") if fmt == "newline" else body.count(",") + 1 if body else 0
+            preview = "\n".join(body.split("\n")[:8]) if fmt == "newline" else body[:400]
+            response = (
+                f"📧 {count} unique emails exported ({fmt} format).\n"
+                f"Preview:\n{preview}"
+                + ("\n  …" if (fmt == "newline" and body.count("\n") > 7) else "")
+                + f"\n\n💡 Full file via: GET /api/admin/leads/export?format=emails-{fmt}"
+            )
+        except Exception as e:
+            response = f"Email export failed: {e}"
+    elif intent == "export_csv":
+        try:
+            body = enrichment.export_leads_csv()
+            rows = body.count("\n")
+            response = (
+                f"📊 Exported {rows} lead rows to CSV.\n"
+                f"💡 Download: GET /api/admin/leads/export?format=csv\n"
+                f"   With email only: ?format=csv-with-email\n"
+                f"   With phone only: ?format=csv-with-phone"
+            )
+        except Exception as e:
+            response = f"CSV export failed: {e}"
+    elif intent == "lead_send_whatsapp":
+        m_wa = re.match(r"^(?:send\s+(?:wa|whatsapp)|wa|message)\s+(?:to\s+)?(.+?)$", text.lower())
+        fragment = m_wa.group(1).strip() if m_wa else ""
+        if not fragment:
+            response = "Tell me which lead. Try: 'send wa to Kedai Kebun'."
+        else:
+            try:
+                matches = outreach.list_leads(limit=500)
+                hit = next((l for l in matches if fragment.lower() in (l.get("business_name") or "").lower()), None)
+                if not hit:
+                    response = f"No lead matches '{fragment}'. Try 'show leads' to see what's in the CRM."
+                else:
+                    link = outreach.build_whatsapp_link(hit)
+                    if not link:
+                        response = f"⚠️ '{hit['business_name']}' has no phone or WhatsApp — run 'enrich leads' first."
+                    else:
+                        outreach.log_interaction(hit["id"], "whatsapp", "out", link["message_preview"], link["template_id"])
+                        response = (
+                            f"💬 WhatsApp link for {hit['business_name']}:\n{link['url']}\n\n"
+                            f"Preview: {link['message_preview'][:200]}"
+                        )
+            except Exception as e:
+                response = f"WhatsApp send failed: {e}"
     elif intent == "match_bank_csv":
         # Strip the command keyword if present so only the CSV is parsed.
         csv_text = text
@@ -1486,13 +1588,17 @@ def process(user_input):
                 response = f"Bank import failed: {e}"
     elif intent == "what_user_taught":
         # Filter facts/responses to those marked as user_taught so user can verify storage.
+        # Use recency-ordered helper so the LATEST teaching shows first — confidence ordering
+        # buried newly-stored facts under legacy high-confidence entries.
+        from brain.memory import get_recent_facts
+        user_facts_recent = get_recent_facts(limit=20, source="user_taught")
         all_facts = get_all_facts()
-        user_facts = [f for f in all_facts if f.get("source") == "user_taught"]
+        user_facts_total = [f for f in all_facts if f.get("source") == "user_taught"]
         all_resp = get_all_responses()
         lines = []
-        if user_facts:
-            lines.append(f"📚 Facts you taught me ({len(user_facts)}):")
-            for f in user_facts[-15:]:
+        if user_facts_recent:
+            lines.append(f"📚 Facts you taught me ({len(user_facts_total)} total, showing most recent {len(user_facts_recent)}):")
+            for f in user_facts_recent:
                 topic = f.get("topic", "general")
                 info = f.get("info", "")
                 lines.append(f"  • {topic}: {info}")
@@ -1501,7 +1607,7 @@ def process(user_input):
             lines.append(f"💬 Reply rules you set ({len(all_resp)}):")
             for r in all_resp[-10:]:
                 lines.append(f"  • when you say \"{r.get('trigger','?')}\" → I say \"{r.get('response','?')}\"")
-        if not user_facts and not all_resp:
+        if not user_facts_total and not all_resp:
             lines.append("Nothing yet. Try teaching me with: 'remember: [fact]' or 'when I say X, you should say Y'.")
         response = "\n".join(lines)
     elif intent == "pending_payments":
@@ -1687,22 +1793,15 @@ def process(user_input):
             if not is_dont_know:
                 save_message("2B", response)
                 return response
-            # We have researched data but returned "don't know" — try LLM with context
-            # Feed the research into LLM so it can form a natural answer
+            # Handler returned "don't know" — but stored facts might still hold the answer.
+            # Always try LLM-with-context now; it pulls top 10 relevant facts from memory
+            # (user_taught ranked first) and lets the model compose a real answer.
             if llm.is_available():
-                # Gather any facts we just stored from research
-                topics = extract_topic(text)
-                fresh_facts = []
-                for word in topics:
-                    if len(word) > 3:
-                        fresh_facts.extend(search_facts(word))
-                if fresh_facts:
-                    # LLM gets the research results as context
-                    llm_response = think_with_llm(text, intent)
-                    if llm_response and "cannot" not in llm_response.lower() and "unable to" not in llm_response.lower() and "i can't browse" not in llm_response.lower():
-                        save_message("2B", llm_response)
-                        return llm_response
-            # Return the research response or don't-know
+                llm_response = think_with_llm(text, intent)
+                if llm_response and "cannot" not in llm_response.lower() and "unable to" not in llm_response.lower() and "i can't browse" not in llm_response.lower():
+                    save_message("2B", llm_response)
+                    return llm_response
+            # Return the research response or don't-know as last resort
             save_message("2B", response)
             return response
 

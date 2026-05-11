@@ -206,7 +206,20 @@ def add_fact(topic, info, source=None):
 def search_facts(query):
     conn = get_db()
     query_lower = query.lower().strip()
-    words = [w for w in query_lower.split() if len(w) > 2]
+    # Strip stopwords so "who is your admin" → ["admin"] not ["who","your","admin"].
+    # Stopwords would otherwise inflate the word count and push min_hits past
+    # what a single-keyword fact can satisfy.
+    STOPWORDS = {
+        "who", "what", "where", "when", "why", "how", "which", "is", "are",
+        "was", "were", "the", "a", "an", "your", "my", "you", "i", "me",
+        "do", "does", "did", "can", "will", "would", "should", "could",
+        "of", "on", "at", "by", "to", "for", "with", "from", "as", "this",
+        "that", "these", "those", "it", "its",
+    }
+    all_words = [w for w in query_lower.split() if len(w) > 2]
+    words = [w for w in all_words if w not in STOPWORDS]
+    if not words:  # query was all stopwords — fall back to original
+        words = all_words
     results = []
 
     # 1. Exact full-query match in info (strongest signal)
@@ -218,7 +231,7 @@ def search_facts(query):
         for r in rows:
             results.append((r, 3))  # priority boost
 
-    # 2. Word-level matches — require at least 2 word hits for multi-word queries
+    # 2. Word-level matches — meaningful-word hits only
     word_hits = {}
     for word in words:
         rows = conn.execute(
@@ -231,14 +244,21 @@ def search_facts(query):
                 word_hits[key] = {"row": r, "hits": 0}
             word_hits[key]["hits"] += 1
 
-    min_hits = min(2, len(words)) if len(words) > 1 else 1
-    for key, data in word_hits.items():
-        if data["hits"] >= min_hits:
-            results.append((data["row"], data["hits"]))
+    # Threshold: need at least half the meaningful words to match (rounded up).
+    # 1 word query → 1 hit. 2 words → 1 hit. 3 words → 2 hits. 4 words → 2 hits.
+    min_hits = max(1, (len(words) + 1) // 2)
+    # If nothing meets min_hits, relax to 1 — better to surface a partial match
+    # than return nothing and force the LLM to hallucinate.
+    qualified = [(d, k) for k, d in word_hits.items() if d["hits"] >= min_hits]
+    if not qualified and word_hits:
+        qualified = [(d, k) for k, d in word_hits.items() if d["hits"] >= 1]
+    for data, _ in qualified:
+        results.append((data["row"], data["hits"]))
 
     conn.close()
 
-    # Deduplicate, score by (confidence * hit_count), sort
+    # Deduplicate, score, sort. user_taught gets a big multiplier so curated
+    # knowledge always outranks scraped wikipedia/news entries when both match.
     seen = set()
     unique = []
     for r, hits in results:
@@ -246,12 +266,14 @@ def search_facts(query):
         if key not in seen:
             seen.add(key)
             conf = r["confidence"] if "confidence" in r.keys() else 0.5
+            source = r["source"] if "source" in r.keys() else "unknown"
+            source_boost = 5.0 if source == "user_taught" else 1.0
             unique.append({
                 "topic": r["topic"],
                 "info": r["info"],
-                "source": r["source"] if "source" in r.keys() else "unknown",
+                "source": source,
                 "confidence": conf,
-                "_score": conf * hits,
+                "_score": conf * hits * source_boost,
             })
     unique.sort(key=lambda x: x["_score"], reverse=True)
     return unique
@@ -275,6 +297,27 @@ def get_all_facts():
     return [{"topic": r["topic"], "info": r["info"],
              "source": r["source"] if "source" in r.keys() else "unknown",
              "confidence": r["confidence"] if "confidence" in r.keys() else 0.5} for r in rows]
+
+
+def get_recent_facts(limit=15, source=None):
+    """Most-recently-added facts first. Use for 'what did I teach you?' so
+    the user sees what was just stored, not the highest-confidence legacy entries."""
+    conn = get_db()
+    if source:
+        rows = conn.execute(
+            "SELECT topic, info, source, confidence, created FROM facts WHERE source = ? ORDER BY id DESC LIMIT ?",
+            (source, limit)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT topic, info, source, confidence, created FROM facts ORDER BY id DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+    conn.close()
+    return [{"topic": r["topic"], "info": r["info"],
+             "source": r["source"] if "source" in r.keys() else "unknown",
+             "confidence": r["confidence"] if "confidence" in r.keys() else 0.5,
+             "created": r["created"] if "created" in r.keys() else ""} for r in rows]
 
 
 # --- Conversations ---

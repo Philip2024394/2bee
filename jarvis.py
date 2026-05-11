@@ -773,6 +773,22 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/llm/status":
             self.send_json(llm.get_status())
 
+        # --- LLM HEALTH — which free AI models are reachable RIGHT NOW ---
+        elif self.path == "/api/llm/health":
+            from brain import llm
+            try:
+                self.send_json(llm.probe_all_models())
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        # --- AUTO-SCRAPER stats — 24/7 knowledge-growth daemon ---
+        elif self.path == "/api/scraper/stats":
+            try:
+                from brain import auto_scraper, awake_mode
+                self.send_json({"scraper": auto_scraper.get_stats(), "awake": awake_mode.status()})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         # --- ADMIN DASHBOARD (live Supabase data) ---
         elif self.path == "/api/admin/status":
             from brain import supabase_connector as sb
@@ -860,8 +876,8 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
                     body = enrichment.export_leads_csv(only_with_phone=True)
                     fname = "leads-with-phone.csv"
                     ctype = "text/csv; charset=utf-8"
-                elif fmt.startswith("emails-"):
-                    sub = fmt.split("-", 1)[1]
+                elif fmt.startswith("emails-") or fmt in ("newline", "comma", "semicolon"):
+                    sub = fmt.split("-", 1)[1] if fmt.startswith("emails-") else fmt
                     body = enrichment.export_emails_only(format=sub)
                     fname = f"emails-{sub}.txt"
                     ctype = "text/plain; charset=utf-8"
@@ -1144,11 +1160,33 @@ def main():
     print(f"  Press Ctrl+C to shut down")
     print()
 
-    # Start multi-threaded server
-    server = ThreadedHTTPServer(("", PORT), BeeHandler)
+    # Keep Windows awake so 2b keeps learning 24/7
+    try:
+        from brain import awake_mode
+        if awake_mode.acquire():
+            print(f"  Awake-mode: ON (Windows won't sleep while 2b runs)")
+    except Exception as e:
+        print(f"  Awake-mode: skipped ({e})")
+
+    # Background knowledge daemon — pulls Wikipedia/HN/ArXiv into memory 24/7
+    try:
+        from brain import auto_scraper
+        auto_scraper.start(min_sleep=120, max_sleep=300)
+        print(f"  Auto-scraper: ON (Wikipedia + HackerNews + ArXiv every 2-5 min)")
+    except Exception as e:
+        print(f"  Auto-scraper: skipped ({e})")
+
+    # Start multi-threaded server — loopback-only so no LAN or web crawler can reach 2b
+    server = ThreadedHTTPServer(("127.0.0.1", PORT), BeeHandler)
 
     def cleanup(signum=None, frame=None):
         print("\n  Shutting down...")
+        try:
+            from brain import auto_scraper, awake_mode
+            auto_scraper.stop()
+            awake_mode.release()
+        except Exception:
+            pass
         learner.stop()
         print("  Learner stopped. Data saved in data/2bee.db")
         server.server_close()

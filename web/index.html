@@ -1833,7 +1833,9 @@ async function enrichAllLeads() {
     btn.disabled = true;
     const orig = btn.textContent;
     btn.textContent = '⏳ Scraping websites + IG bios (real, no fake progress)…';
-    result.innerHTML = '<span style="color:#ffd700;">Running enrichment. Real scraping in progress — this may take 1-3 minutes per 50 leads.</span>';
+    result.innerHTML = '<span style="color:#ffd700;">Running enrichment. May take 1-3 minutes per 50 leads.</span>';
+    addMessage('user', '🔍 Enrich all leads (visit each website + IG)');
+    addMessage('bee', 'Running enrichment scan. Hitting each lead\'s website + Instagram. Real work — no fake progress bar.');
     try {
         const res = await fetch('/api/admin/leads/enrich-all', {
             method: 'POST',
@@ -1843,17 +1845,21 @@ async function enrichAllLeads() {
         const data = await res.json();
         if (data.error) {
             result.innerHTML = '<span style="color:#ff4444;">⚠️ ' + data.error + '</span>';
+            addMessage('bee', '⚠️ Enrichment failed: ' + data.error);
         } else {
+            const summary = `✓ Enrichment scan complete.\n  • Scanned: ${data.scanned} leads with missing phone/whatsapp\n  • Enriched: ${data.enriched} (new emails ${data.new_emails}, phones ${data.new_phones}, WAs ${data.new_whatsapps})\n  • No public contacts found: ${data.no_data_found}\n  • Errors: ${data.errors}`;
             result.innerHTML = `<div style="color:#00ff88;font-weight:700;">✓ Done. Real numbers:</div>
                 <div style="color:#cdd5e0;margin-top:4px;">Scanned: ${data.scanned} leads</div>
                 <div style="color:#00ff88;">Enriched: ${data.enriched}</div>
                 <div style="color:#cdd5e0;">  → New phones: ${data.new_phones}, new WAs: ${data.new_whatsapps}, new emails: ${data.new_emails}</div>
                 <div style="color:#8a9aaa;">No public contact data found: ${data.no_data_found}</div>
                 ${data.errors ? `<div style="color:#ff4444;">Errors: ${data.errors}</div>` : ''}`;
+            addMessage('bee', summary);
             loadLeads();
         }
     } catch (e) {
         result.innerHTML = '<span style="color:#ff4444;">⚠️ ' + e.message + '</span>';
+        addMessage('bee', '⚠️ Enrichment crashed: ' + e.message);
     }
     btn.disabled = false;
     btn.textContent = orig;
@@ -1869,20 +1875,27 @@ async function scrapeLeadsAndImport() {
     btn.disabled = true;
     btn.textContent = 'Scraping OpenStreetMap…';
     result.innerHTML = '<span style="color:#ffd700;">⏳ Running real query — no fake progress.</span>';
+    addMessage('user', `🔎 find ${keyword} in ${city}, ${country}`);
+    addMessage('bee', `Scraping OpenStreetMap for ${keyword} in ${city}… This usually takes 10–30s. Geocoding the city, then querying Overpass.`);
     try {
         const res = await fetch('/api/admin/leads/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ keyword, city, country, limit: 50 }) });
         const data = await res.json();
         if (data.error) {
             result.innerHTML = '<span style="color:#ff4444;">⚠️ ' + data.error + '</span>';
+            addMessage('bee', '⚠️ ' + data.error);
         } else {
             const s = data.summary;
+            const preview = (data.preview || []).slice(0, 8).map(p => `  • ${p.business_name}${p.phone ? '  📞 '+p.phone : ''}${p.website ? '  🌐 '+p.website : ''}`).join('\n');
+            const summary = `✓ Found ${(data.preview||[]).length} ${keyword} in ${city}\n  • Imported: ${s.inserted} new\n  • Skipped: ${s.skipped} duplicates (already in CRM)\n  • Errors: ${s.errors}\n\nTop results:\n${preview}\n\n${s.inserted === 0 ? '💡 0 imported means these were all scraped previously. Try a different city or category to get fresh leads.' : '💡 Run \'enrich leads\' next to fill in missing phone/email from their websites.'}`;
             result.innerHTML = `<div style="color:#00ff88;font-weight:700;">✓ Imported ${s.inserted} new leads</div>
                 <div style="color:#8a9aaa;margin-top:4px;">Skipped ${s.skipped} duplicates · ${s.errors} errors</div>
                 ${(data.preview || []).map(p => `<div style="margin-top:4px;color:#cdd5e0;font-size:0.85em;">• ${p.business_name}${p.phone ? ' · 📞 '+p.phone : ''}</div>`).join('')}`;
+            addMessage('bee', summary);
             loadLeads();
         }
     } catch (e) {
         result.innerHTML = '<span style="color:#ff4444;">⚠️ ' + e.message + '</span>';
+        addMessage('bee', '⚠️ Scrape crashed: ' + e.message);
     }
     btn.disabled = false;
     btn.textContent = 'Find + Import to CRM';

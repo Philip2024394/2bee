@@ -598,6 +598,112 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
 
+        elif self.path == "/api/agent/leads/grab":
+            # Agent grabs N unassigned leads — atomic SELECT FOR UPDATE.
+            from brain import supabase_connector as sb
+            body = self.read_body()
+            try:
+                agent_id = body.get("agent_id")
+                n = int(body.get("count", 25))
+                if not agent_id:
+                    self.send_json({"error": "agent_id required"}, 401); return
+                # Assign N unassigned, new-status leads with a phone or whatsapp.
+                sql = f"""
+                WITH picked AS (
+                  SELECT id FROM outreach_leads
+                  WHERE agent_id IS NULL
+                    AND status = 'new'
+                    AND (phone IS NOT NULL OR whatsapp IS NOT NULL)
+                  ORDER BY created_at ASC
+                  LIMIT {n}
+                  FOR UPDATE SKIP LOCKED
+                )
+                UPDATE outreach_leads SET agent_id = '{agent_id}', status = 'queued'
+                WHERE id IN (SELECT id FROM picked)
+                RETURNING id, business_name, business_type, city, phone, whatsapp, target_app;
+                """
+                rows = sb._management_query(sql)
+                self.send_json({"assigned": rows or [], "count": len(rows) if rows else 0})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/agent/leads/mine":
+            # List leads currently assigned to this agent.
+            from brain import supabase_connector as sb
+            body = self.read_body()
+            try:
+                agent_id = body.get("agent_id")
+                if not agent_id:
+                    self.send_json({"error": "agent_id required"}, 401); return
+                leads = sb._rest_get("outreach_leads", {
+                    "select": "id,business_name,business_type,city,phone,whatsapp,address,status,target_app,last_contacted_at",
+                    "agent_id": f"eq.{agent_id}",
+                    "order": "status.asc,created_at.desc",
+                    "limit": "200",
+                })
+                self.send_json({"leads": leads})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/agent/leads/whatsapp":
+            # Same as admin WhatsApp endpoint but logs agent_id.
+            from brain import outreach
+            from brain import supabase_connector as sb
+            body = self.read_body()
+            try:
+                lead_id = body.get("lead_id"); agent_id = body.get("agent_id")
+                if not lead_id or not agent_id:
+                    self.send_json({"error": "lead_id + agent_id required"}, 400); return
+                rows = sb._rest_get("outreach_leads", {"select": "*", "id": f"eq.{lead_id}", "agent_id": f"eq.{agent_id}"})
+                if not rows:
+                    self.send_json({"error": "lead not found or not assigned to you"}, 404); return
+                link = outreach.build_whatsapp_link(rows[0], body.get("template_id"))
+                if not link:
+                    self.send_json({"error": "no phone"}, 400); return
+                outreach.log_interaction(lead_id, "whatsapp", "out", link["message_preview"], link["template_id"])
+                self.send_json(link)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/agent/leads/status":
+            from brain import outreach
+            from brain import supabase_connector as sb
+            body = self.read_body()
+            try:
+                agent_id = body.get("agent_id"); lead_id = body.get("lead_id"); status = body.get("status")
+                if not lead_id or not agent_id or not status:
+                    self.send_json({"error": "agent_id + lead_id + status required"}, 400); return
+                # Verify ownership
+                rows = sb._rest_get("outreach_leads", {"select": "id", "id": f"eq.{lead_id}", "agent_id": f"eq.{agent_id}"})
+                if not rows:
+                    self.send_json({"error": "lead not assigned to you"}, 404); return
+                result = outreach.update_lead_status(lead_id, status, body.get("note"))
+                self.send_json({"lead": result})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/agent/leaderboard":
+            from brain import supabase_connector as sb
+            try:
+                # Aggregate: leads assigned, contacted, signed, conversion rate.
+                sql = """
+                SELECT
+                  a.id, a.name, a.agent_code,
+                  COUNT(l.id) AS leads_assigned,
+                  COUNT(l.id) FILTER (WHERE l.status IN ('contacted','responded','interested','signed')) AS contacted,
+                  COUNT(l.id) FILTER (WHERE l.status = 'signed') AS signed
+                FROM affiliate_agents a
+                LEFT JOIN outreach_leads l ON l.agent_id = a.id
+                GROUP BY a.id, a.name, a.agent_code
+                HAVING COUNT(l.id) > 0
+                ORDER BY signed DESC, contacted DESC, leads_assigned DESC
+                LIMIT 50;
+                """
+                rows = sb._management_query(sql) or []
+                self.send_json({"leaderboard": rows})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         elif self.path == "/api/admin/leads/enrich-all":
             # POST { limit? } → run public-source enrichment across phoneless leads.
             from brain import enrichment

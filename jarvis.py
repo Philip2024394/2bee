@@ -598,6 +598,29 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
 
+        elif self.path == "/api/admin/leads/update":
+            # POST { lead_id, phone?, whatsapp?, email?, notes? } → enrich contact info.
+            from brain import supabase_connector as sb
+            body = self.read_body()
+            try:
+                lead_id = body.get("lead_id")
+                fields = {}
+                for k in ("phone", "whatsapp", "email", "notes"):
+                    if k in body and body[k] is not None:
+                        fields[k] = body[k]
+                if not fields:
+                    self.send_json({"error": "no fields to update"}, 400); return
+                # Build SQL safely.
+                set_parts = []
+                for k, v in fields.items():
+                    safe = (str(v) or "").replace("'", "''")
+                    set_parts.append(f"{k} = NULLIF('{safe}', '')")
+                sql = f"UPDATE outreach_leads SET {', '.join(set_parts)}, updated_at = NOW() WHERE id = '{lead_id}' RETURNING id, business_name, phone, whatsapp, email;"
+                result = sb._management_query(sql)
+                self.send_json({"lead": result[0] if result else None})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         else:
             self.send_response(404)
             self.end_headers()

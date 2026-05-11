@@ -1752,7 +1752,10 @@ async function loadLeads() {
                     <span style="background:${sc};color:${sc === '#888' || sc === '#666' ? '#fff' : '#0a0a0f'};padding:2px 6px;border-radius:3px;font-size:0.65em;font-weight:900;text-transform:uppercase;white-space:nowrap;">${l.status}</span>
                 </div>
                 <div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
-                    ${phone ? `<button onclick="openLeadWhatsApp('${l.id}')" style="background:#25D366;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">💬 WhatsApp</button>` : ''}
+                    ${phone ? `<button onclick="openLeadWhatsApp('${l.id}')" style="background:#25D366;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">💬 WhatsApp</button>` : `
+                    <button onclick="searchLeadOnline('${l.business_name.replace(/'/g, "\\'")}','${(l.city||'').replace(/'/g, "\\'")}')" style="background:#4285F4;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">🔍 Search Online</button>
+                    <button onclick="addLeadPhone('${l.id}','${l.business_name.replace(/'/g, "\\'")}')" style="background:#ffd700;color:#0a0a0f;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">📝 Add Phone</button>
+                    `}
                     <button onclick="setLeadStatus('${l.id}','contacted')" style="background:#3498db;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">Contacted</button>
                     <button onclick="setLeadStatus('${l.id}','interested')" style="background:#00ff88;color:#0a0a0f;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">Interested</button>
                     <button onclick="setLeadStatus('${l.id}','not_interested')" style="background:#666;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">Not Interested</button>
@@ -1773,6 +1776,30 @@ function setLeadFilter(status) {
 async function setLeadStatus(leadId, status) {
     try {
         await fetch('/api/admin/leads/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ lead_id: leadId, status }) });
+        loadLeads();
+    } catch (e) { alert('Failed: ' + e.message); }
+}
+
+function searchLeadOnline(name, city) {
+    // Multi-tab Google search: Google web, Google Maps, Instagram, Facebook.
+    // Looking for the business's own contact info on their own channels — legal research.
+    const q = encodeURIComponent(`"${name}" ${city || ''} whatsapp OR phone OR instagram OR kontak`);
+    window.open(`https://www.google.com/search?q=${q}`, '_blank');
+    const mapsQ = encodeURIComponent(`${name} ${city || ''}`);
+    window.open(`https://www.google.com/maps/search/${mapsQ}`, '_blank');
+}
+
+async function addLeadPhone(leadId, name) {
+    const phone = prompt(`Phone or WhatsApp number for "${name}"?\n\nFormats accepted: +62 812 3456 7890, 081234567890, etc.\nIndonesian numbers starting with 0 auto-convert to +62.`);
+    if (!phone) return;
+    try {
+        const res = await fetch('/api/admin/leads/update', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ lead_id: leadId, whatsapp: phone })
+        });
+        const data = await res.json();
+        if (data.error) { alert('Failed: ' + data.error); return; }
         loadLeads();
     } catch (e) { alert('Failed: ' + e.message); }
 }

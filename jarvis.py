@@ -548,6 +548,74 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/llm/status":
             self.send_json(llm.get_status())
 
+        # --- ADMIN DASHBOARD (live Supabase data) ---
+        elif self.path == "/api/admin/status":
+            from brain import supabase_connector as sb
+            try:
+                self.send_json(sb.get_system_status())
+            except Exception as e:
+                self.send_json({"status": "error", "error": str(e)}, 500)
+
+        elif self.path == "/api/admin/alerts":
+            from brain import supabase_connector as sb
+            try:
+                self.send_json({"alerts": sb.get_alerts()})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/signups":
+            from brain import supabase_connector as sb
+            try:
+                self.send_json({"signups": sb.list_recent_signups(days=14)})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/payment-due":
+            from brain import supabase_connector as sb
+            try:
+                self.send_json({"due": sb.list_payment_due(days_ahead=14)})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/pending-payments":
+            from brain import supabase_connector as sb
+            try:
+                self.send_json({"pending": sb.list_pending_payments()})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/stats":
+            from brain import supabase_connector as sb
+            try:
+                snapshot = sb.get_health_snapshot()
+                countries = sb.get_country_breakdown()
+                apps = sb.get_app_type_breakdown()
+                themes = sb.get_theme_popularity(window_hours=24)
+                sessions = sb.get_session_duration_stats(days=7)
+                self.send_json({
+                    "snapshot": snapshot,
+                    "countries": countries,
+                    "apps": apps,
+                    "themes_24h": themes,
+                    "sessions_7d": sessions,
+                })
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/countries":
+            from brain import supabase_connector as sb
+            try:
+                self.send_json({"countries": sb.get_country_breakdown()})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/suggestions":
+            from brain import supabase_connector as sb
+            try:
+                self.send_json({"suggestions": sb.generate_suggestions()})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         # --- THEME LIBRARY ---
         elif self.path == "/api/themes/pending":
             from brain.theme_generator import get_pending

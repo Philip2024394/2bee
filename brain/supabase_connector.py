@@ -311,3 +311,211 @@ def format_alerts(alerts):
     for a in alerts:
         lines.append(f"  {icons.get(a['severity'], '•')} {a['msg']}")
     return "\n".join(lines)
+
+
+# ─── Admin-dashboard data feeds ─────────────────────────────────────────
+
+def _parse_iso(s):
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
+    except (ValueError, AttributeError):
+        return None
+
+
+def list_recent_signups(days=7, limit=50):
+    """Registrations created within the last N days, newest first."""
+    cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat() + "Z"
+    return _rest_get("app_registrations", {
+        "select": "id,business_name,whatsapp,app_type,app_tier,billing_cycle,price,status,payment_reference,payment_proof_url,created_at",
+        "created_at": f"gte.{cutoff}",
+        "order": "created_at.desc",
+        "limit": str(limit),
+    })
+
+
+def list_payment_due(days_ahead=7, include_expired=True, limit=100):
+    """Active subscriptions with expires_at within the next N days (or already
+    expired if include_expired=True)."""
+    now = datetime.utcnow()
+    soon = (now + timedelta(days=days_ahead)).isoformat() + "Z"
+    rows = _rest_get("app_registrations", {
+        "select": "id,business_name,whatsapp,app_type,app_tier,billing_cycle,price,status,expires_at,payment_reference,verified_at",
+        "status": "eq.active",
+        "expires_at": f"lte.{soon}",
+        "order": "expires_at.asc.nullslast",
+        "limit": str(limit),
+    })
+    if not include_expired:
+        now_iso = now.isoformat() + "Z"
+        rows = [r for r in rows if (r.get("expires_at") or "") >= now_iso]
+    return rows
+
+
+def get_country_breakdown():
+    """Aggregate registrations by country (derived from WhatsApp prefix).
+    Returns list of {country, total, active, pending, deactivated, revenue}.
+    """
+    rows = _rest_get("app_registrations", {
+        "select": "id,status,billing_cycle,price,whatsapp",
+    })
+    buckets = {}
+    for r in rows:
+        country = _country_from_whatsapp(r.get("whatsapp"))
+        b = buckets.setdefault(country, {"country": country, "total": 0, "active": 0, "pending": 0, "deactivated": 0, "revenue": 0})
+        b["total"] += 1
+        status = r.get("status")
+        if status == "active":
+            b["active"] += 1
+            b["revenue"] += _parse_price(r.get("price"))
+        elif status == "pending_verification":
+            b["pending"] += 1
+        elif status == "deactivated":
+            b["deactivated"] += 1
+    return sorted(buckets.values(), key=lambda x: x["total"], reverse=True)
+
+
+def get_app_type_breakdown():
+    """How registrations split across food/basic/pro/products/services apps."""
+    rows = _rest_get("app_registrations", {"select": "app_type,status"})
+    buckets = {}
+    for r in rows:
+        app_type = r.get("app_type") or "unknown"
+        b = buckets.setdefault(app_type, {"app_type": app_type, "total": 0, "active": 0, "pending": 0})
+        b["total"] += 1
+        if r.get("status") == "active":
+            b["active"] += 1
+        elif r.get("status") == "pending_verification":
+            b["pending"] += 1
+    return sorted(buckets.values(), key=lambda x: x["total"], reverse=True)
+
+
+def get_theme_popularity(window_hours=24, limit=15):
+    """Popular themes within the last N hours. Requires a theme_views table —
+    if it doesn't exist or is empty, returns an empty list with a note so the
+    UI can display 'no tracking data yet'."""
+    try:
+        cutoff = (datetime.utcnow() - timedelta(hours=window_hours)).isoformat() + "Z"
+        rows = _rest_get("theme_views", {
+            "select": "theme_id,country",
+            "viewed_at": f"gte.{cutoff}",
+            "limit": "5000",
+        })
+        counts = {}
+        for r in rows:
+            tid = r.get("theme_id") or "unknown"
+            counts[tid] = counts.get(tid, 0) + 1
+        return sorted(
+            [{"theme_id": k, "views": v} for k, v in counts.items()],
+            key=lambda x: x["views"], reverse=True,
+        )[:limit]
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {"_note": "theme_views table not created yet — popularity tracking pending"}
+        raise
+
+
+def get_session_duration_stats(days=7):
+    """Average + median session length. Requires a sessions table — same
+    graceful-degrade behaviour as get_theme_popularity."""
+    try:
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat() + "Z"
+        rows = _rest_get("sessions", {
+            "select": "duration_seconds,app",
+            "started_at": f"gte.{cutoff}",
+            "limit": "10000",
+        })
+        durations = [r["duration_seconds"] for r in rows if r.get("duration_seconds")]
+        if not durations:
+            return {"_note": "no session data in window"}
+        durations.sort()
+        avg = sum(durations) / len(durations)
+        median = durations[len(durations) // 2]
+        by_app = {}
+        for r in rows:
+            app = r.get("app", "unknown")
+            by_app.setdefault(app, []).append(r.get("duration_seconds") or 0)
+        return {
+            "count": len(durations),
+            "avg_seconds": int(avg),
+            "median_seconds": int(median),
+            "by_app": {a: int(sum(v) / len(v)) for a, v in by_app.items() if v},
+        }
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return {"_note": "sessions table not created yet — duration tracking pending"}
+        raise
+
+
+def generate_suggestions():
+    """Pattern analysis over live data → actionable text suggestions for admin.
+    No external AI; pure rule-based reasoning over the health snapshot, country
+    breakdown, and app-type breakdown."""
+    h = get_health_snapshot()
+    countries = get_country_breakdown()
+    apps = get_app_type_breakdown()
+    suggestions = []
+
+    # Pending pile-up
+    if h["pending_with_proof"] >= 5:
+        suggestions.append({"priority": "high", "area": "Operations", "text": f"{h['pending_with_proof']} customer payments have proof uploaded but aren't approved yet. Review the queue in the next 30 minutes — every hour of delay costs you a customer's trust."})
+    if h["pending_no_proof"] >= 10:
+        suggestions.append({"priority": "medium", "area": "Conversion", "text": f"{h['pending_no_proof']} registrations are sitting without payment proof. Consider a WhatsApp follow-up template: 'Hi, your account is reserved — when can you complete payment?'"})
+
+    # Churn
+    if h["churn_rate"] > 15:
+        suggestions.append({"priority": "high", "area": "Retention", "text": f"Churn rate is {h['churn_rate']}% — above the 15% danger line. Pull the last 5 deactivated accounts and call them; ask what broke."})
+    elif h["churn_rate"] > 8:
+        suggestions.append({"priority": "medium", "area": "Retention", "text": f"Churn rate is {h['churn_rate']}%. Healthy is <8%. Watch the trend over the next week."})
+
+    # Renewal pipeline
+    if h["expired"] > 0:
+        suggestions.append({"priority": "high", "area": "Revenue", "text": f"{h['expired']} active subscription(s) have already expired — they're still active in the data but renewal is overdue. Send a renewal nudge today."})
+    if h["expiring_in_7d"] >= 3:
+        suggestions.append({"priority": "medium", "area": "Revenue", "text": f"{h['expiring_in_7d']} subscriptions expire within 7 days. Auto-send renewal reminders 3 days before expiry to reduce drop-off."})
+
+    # Country imbalance — Indonesia heavy?
+    total = sum(c["total"] for c in countries)
+    if total >= 10:
+        top = countries[0]
+        if top["total"] / total > 0.85:
+            suggestions.append({"priority": "low", "area": "Growth", "text": f"{int(top['total']/total*100)}% of customers are in {top['country']}. To diversify revenue, pick one secondary country (your next-biggest is {countries[1]['country'] if len(countries) > 1 else 'unknown'}) and run a localised promo there."})
+
+    # App-type imbalance
+    if apps:
+        top_app = apps[0]
+        if sum(a["total"] for a in apps) > 5 and top_app["total"] > 0:
+            other_total = sum(a["total"] for a in apps[1:])
+            if other_total == 0 and len(apps) == 1:
+                suggestions.append({"priority": "low", "area": "Product", "text": f"All registrations are on '{top_app['app_type']}'. The other apps (food-pro, products, services) have zero traction yet — either pull them off the homepage or run a focused campaign for one."})
+
+    # Empty state
+    if not suggestions:
+        suggestions.append({"priority": "info", "area": "Overall", "text": "Nothing urgent to flag right now. System is operating within healthy ranges. Keep monitoring."})
+
+    return suggestions
+
+
+def get_system_status():
+    """One-shot snapshot for the login greeting — health + top alert + top suggestion."""
+    h = get_health_snapshot()
+    alerts = get_alerts()
+    suggestions = generate_suggestions()
+    # Bucket the system as ok / attention / critical based on signals.
+    critical = sum(1 for a in alerts if a["severity"] == "warning")
+    if critical >= 2:
+        status = "critical"
+    elif critical == 1 or len(alerts) >= 3:
+        status = "attention"
+    else:
+        status = "ok"
+    top_alert = next((a for a in alerts if a["severity"] == "warning"), alerts[0] if alerts else None)
+    top_suggestion = next((s for s in suggestions if s["priority"] in ("high", "medium")), suggestions[0] if suggestions else None)
+    return {
+        "status": status,
+        "snapshot": h,
+        "alert_count": len(alerts),
+        "top_alert": top_alert,
+        "top_suggestion": top_suggestion,
+    }

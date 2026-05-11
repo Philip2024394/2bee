@@ -197,6 +197,13 @@ def classify_intent(text):
         if sep_count >= 2 and sum(1 for h in bank_headers if h in first_line) >= 2:
             return "match_bank_csv"
 
+    # User override — "stop" / "halt" / "cancel" / "shut up". Highest priority
+    # so even mid-flow the user can interrupt 2bee.
+    if lower in ("stop", "halt", "cancel", "abort", "shut up", "be quiet", "quiet",
+                 "stop talking", "stop please", "stop now", "enough", "wait",
+                 "hold on", "pause", "shush"):
+        return "stop_override"
+
     # User addresses 2bee by name — typed "2b" / "2bee" / "hey 2b" / "yo 2bee".
     # 2bee should respond with a time-based greeting + a quick news check.
     if re.match(r"^(hey\s+|hi\s+|yo\s+|hello\s+)?2\s*-?\s*b(ee)?[,\.\!\?\s]*$", lower):
@@ -1369,6 +1376,21 @@ def process(user_input):
                 response = f"No matches found for '{pattern}' in the codebase."
         else:
             response = "What should I search for? Example: 'search code for THEME_PRESETS'"
+    elif intent == "stop_override":
+        # User wants 2bee to stop. Acknowledge briefly. Background tasks
+        # (e.g. theme generation loop) read a global stop flag.
+        try:
+            import brain.thinking as _self
+            _self._stop_requested = True
+        except Exception:
+            pass
+        responses = [
+            "Stopped. I'm here when you're ready.",
+            "Halting. Just say the word when you want to continue.",
+            "Quiet. Standing by.",
+            "Paused. What next?",
+        ]
+        response = pick(responses)
     elif intent == "address_2bee":
         greeting, period, ampm = get_time_period()
         # Quick news check — try the live news fetcher; gracefully degrade.

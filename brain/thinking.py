@@ -20,6 +20,7 @@ from brain import learner as web_learner
 from brain import streetlocal_connector as sl_connect
 from brain import supabase_connector as sb
 from brain import bank_import as bank
+from brain import outreach
 from brain.memory import mark_fact_used
 from brain.memory import (
     add_response, find_response, get_all_responses,
@@ -210,6 +211,19 @@ def classify_intent(text):
                  "stop talking", "stop please", "stop now", "enough", "wait",
                  "hold on", "pause", "shush"):
         return "stop_override"
+
+    # Lead-gen via OpenStreetMap. "find restaurants in yogyakarta" / "search clothes in bali, indonesia"
+    # Country only after a comma — otherwise the city eats the country.
+    m = re.match(r"^(?:find|search|scrape|get|pull)\s+(.+?)\s+in\s+([^,]+?)(?:\s*,\s*(.+?))?\s*$", lower)
+    if m:
+        return "find_businesses"
+    # Show leads pipeline
+    if any(x in lower for x in ("show leads", "list leads", "leads pipeline", "show my leads",
+                                "lead count", "how many leads")):
+        return "show_leads"
+    # Import the last found list
+    if any(x in lower for x in ("import leads", "save leads", "add to crm", "import to crm")):
+        return "import_leads"
 
     # User addresses 2bee by name — typed "2b" / "2bee" / "hey 2b" / "yo 2bee".
     # 2bee should respond with a time-based greeting + a quick news check.
@@ -1413,6 +1427,48 @@ def process(user_input):
     elif intent == "time_period":
         greeting, period, ampm = get_time_period()
         response = f"It's {ampm}, which is {period}."
+    elif intent == "find_businesses":
+        m = re.match(r"^(?:find|search|scrape|get|pull)\s+(.+?)\s+in\s+([^,]+?)(?:\s*,\s*(.+?))?\s*$", text.lower())
+        if m:
+            keyword = m.group(1).strip()
+            city = m.group(2).strip().title()
+            country = (m.group(3) or "Indonesia").strip().title()
+            try:
+                result = outreach.find_businesses(keyword, city, country, limit=30)
+                # Cache the last result so 'import leads' can use it.
+                import brain.thinking as _self
+                _self._last_business_results = result.get("results", []) if isinstance(result, dict) else []
+                response = outreach.format_business_list(result)
+                if _self._last_business_results:
+                    response += f"\n\n💡 Say 'import leads' to save all {len(_self._last_business_results)} to the CRM."
+            except Exception as e:
+                response = f"Lead search failed: {e}"
+        else:
+            response = "Try: 'find restaurants in Yogyakarta' or 'search salon in Jakarta'."
+    elif intent == "import_leads":
+        last = getattr(__import__("brain.thinking", fromlist=["_last_business_results"]), "_last_business_results", [])
+        if not last:
+            response = "No search results to import. First run a 'find <category> in <city>' search."
+        else:
+            try:
+                summary = outreach.import_leads(last)
+                response = outreach.format_import_summary(summary)
+            except Exception as e:
+                response = f"Import failed: {e}"
+    elif intent == "show_leads":
+        try:
+            stats = outreach.get_lead_stats()
+            total = sum(stats.values())
+            if total == 0:
+                response = "No leads yet. Try 'find restaurants in Yogyakarta' to start building your pipeline."
+            else:
+                lines = [f"📋 Leads pipeline ({total} total):"]
+                for status in ("new", "queued", "contacted", "responded", "interested", "signed", "not_interested", "dead"):
+                    if stats.get(status):
+                        lines.append(f"  • {status.replace('_',' ').title()}: {stats[status]}")
+                response = "\n".join(lines)
+        except Exception as e:
+            response = f"Couldn't fetch leads: {e}"
     elif intent == "match_bank_csv":
         # Strip the command keyword if present so only the CSV is parsed.
         csv_text = text

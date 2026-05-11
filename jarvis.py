@@ -533,6 +533,71 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
 
+        elif self.path == "/api/admin/leads/scrape":
+            # POST { keyword, city, country? } → find + return preview list.
+            from brain import outreach
+            body = self.read_body()
+            try:
+                result = outreach.find_businesses(
+                    body.get("keyword", ""),
+                    body.get("city", ""),
+                    body.get("country") or "Indonesia",
+                    limit=int(body.get("limit", 50)),
+                )
+                self.send_json(result)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/leads/import":
+            # POST { keyword, city, country? } → scrape AND insert.
+            from brain import outreach
+            body = self.read_body()
+            try:
+                result = outreach.find_businesses(
+                    body.get("keyword", ""),
+                    body.get("city", ""),
+                    body.get("country") or "Indonesia",
+                    limit=int(body.get("limit", 50)),
+                )
+                if "error" in result:
+                    self.send_json(result, 400); return
+                summary = outreach.import_leads(result["results"])
+                self.send_json({"summary": summary, "preview": result["results"][:5]})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/leads/whatsapp":
+            # POST { lead_id, template_id? } → return WA URL + log the outbound.
+            from brain import outreach
+            body = self.read_body()
+            try:
+                lead_id = body.get("lead_id")
+                from brain import supabase_connector as sb
+                rows = sb._rest_get("outreach_leads", {"select": "*", "id": f"eq.{lead_id}"})
+                if not rows:
+                    self.send_json({"error": "lead not found"}, 404); return
+                link = outreach.build_whatsapp_link(rows[0], body.get("template_id"))
+                if not link:
+                    self.send_json({"error": "lead has no phone/whatsapp number"}, 400); return
+                outreach.log_interaction(lead_id, "whatsapp", "out", link["message_preview"], link["template_id"])
+                self.send_json(link)
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path == "/api/admin/leads/status":
+            # POST { lead_id, status, note? } → update status, log note.
+            from brain import outreach
+            body = self.read_body()
+            try:
+                result = outreach.update_lead_status(
+                    body.get("lead_id"),
+                    body.get("status"),
+                    body.get("note"),
+                )
+                self.send_json({"lead": result})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
         else:
             self.send_response(404)
             self.end_headers()
@@ -618,6 +683,22 @@ class BeeHandler(http.server.SimpleHTTPRequestHandler):
             from brain import supabase_connector as sb
             try:
                 self.send_json({"suggestions": sb.generate_suggestions()})
+            except Exception as e:
+                self.send_json({"error": str(e)}, 500)
+
+        elif self.path.startswith("/api/admin/leads"):
+            from brain import outreach
+            try:
+                # Query params: ?status=new&country=Indonesia&city=Yogyakarta
+                import urllib.parse as _up
+                qs = _up.parse_qs(_up.urlparse(self.path).query)
+                leads = outreach.list_leads(
+                    status=(qs.get("status") or [None])[0],
+                    country=(qs.get("country") or [None])[0],
+                    city=(qs.get("city") or [None])[0],
+                )
+                stats = outreach.get_lead_stats()
+                self.send_json({"leads": leads, "stats": stats})
             except Exception as e:
                 self.send_json({"error": str(e)}, 500)
 

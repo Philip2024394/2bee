@@ -530,6 +530,7 @@ button:hover { background: #ffd700; color: #0a0a0f; }
             <button class="dash-nav-btn" onclick="showDashTab('stats')" id="dash-tab-stats">📊 Stats</button>
             <button class="dash-nav-btn" onclick="showDashTab('countries')" id="dash-tab-countries">🌍 Countries</button>
             <button class="dash-nav-btn" onclick="showDashTab('suggestions')" id="dash-tab-suggestions">💡 Suggestions</button>
+            <button class="dash-nav-btn" onclick="showDashTab('leads')" id="dash-tab-leads">🎯 Leads (CRM)</button>
             <button class="dash-nav-btn" onclick="showDashTab('overview')" id="dash-tab-overview">📚 Quick Cmds</button>
             <button class="dash-nav-btn" onclick="showDashTab('vendors')" id="dash-tab-vendors">👥 Vendors</button>
             <button class="dash-nav-btn" onclick="showDashTab('codes')" id="dash-tab-codes">🔑 Codes</button>
@@ -628,6 +629,33 @@ button:hover { background: #ffd700; color: #0a0a0f; }
                 <div class="dash-section-title">2bee's behavioural read</div>
                 <div style="font-size:0.7em;color:#8a9aaa;margin-bottom:8px;">Pattern analysis over live signups, churn, payments, country mix, and app split.</div>
                 <div id="suggestions-list" style="font-size:0.8em;color:#cdd5e0;line-height:1.55;">Loading…</div>
+            </div>
+        </div>
+
+        <!-- Leads (CRM) Tab -->
+        <div id="dash-content-leads" class="dash-tab-content" style="display:none">
+            <div class="dash-section">
+                <div class="dash-section-title">Find new leads (OpenStreetMap)</div>
+                <div style="font-size:0.7em;color:#8a9aaa;margin-bottom:8px;">Pulls real businesses from OSM by category + city. No spam — leads are individual targets for personalized WhatsApp outreach.</div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                    <input id="leads-keyword" type="text" placeholder="Category (warung, salon, mechanic, electronics...)" style="background:#141921;border:1px solid #1a3a5c;color:#fff;padding:8px;border-radius:6px;font-family:inherit;font-size:0.85em;outline:none;" />
+                    <input id="leads-city" type="text" placeholder="City (Yogyakarta, Jakarta, Bali...)" style="background:#141921;border:1px solid #1a3a5c;color:#fff;padding:8px;border-radius:6px;font-family:inherit;font-size:0.85em;outline:none;" />
+                    <input id="leads-country" type="text" placeholder="Country (default: Indonesia)" style="background:#141921;border:1px solid #1a3a5c;color:#fff;padding:8px;border-radius:6px;font-family:inherit;font-size:0.85em;outline:none;" />
+                    <button onclick="scrapeLeadsAndImport()" id="leads-scrape-btn" style="background:#ffd700;color:#0a0a0f;border:none;padding:10px;border-radius:6px;font-weight:800;cursor:pointer;font-size:0.9em;">Find + Import to CRM</button>
+                </div>
+                <div id="leads-scrape-result" style="margin-top:10px;font-size:0.78em;color:#cdd5e0;"></div>
+            </div>
+            <div class="dash-section">
+                <div class="dash-section-title">Pipeline</div>
+                <div id="leads-pipeline" style="font-size:0.78em;color:#cdd5e0;">Loading…</div>
+            </div>
+            <div class="dash-section">
+                <div class="dash-section-title">Filter by status</div>
+                <div id="leads-status-filter" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;"></div>
+            </div>
+            <div class="dash-section">
+                <div class="dash-section-title">Leads</div>
+                <div id="leads-list" style="font-size:0.75em;color:#cdd5e0;">Loading…</div>
             </div>
         </div>
 
@@ -1680,6 +1708,112 @@ function showDashTab(tab) {
     else if (tab === 'stats') loadAdminStats();
     else if (tab === 'countries') loadAdminCountries();
     else if (tab === 'suggestions') loadAdminSuggestions();
+    else if (tab === 'leads') loadLeads();
+}
+
+// ─── Leads / CRM ──────────────────────────────────────────────────────
+let _leadStatusFilter = null;
+
+async function loadLeads() {
+    try {
+        const qs = _leadStatusFilter ? '?status=' + encodeURIComponent(_leadStatusFilter) : '';
+        const data = await fetch('/api/admin/leads' + qs).then(r => r.json());
+        // Pipeline
+        const stats = data.stats || {};
+        const total = Object.values(stats).reduce((a, b) => a + b, 0);
+        document.getElementById('leads-pipeline').innerHTML = total === 0
+            ? 'No leads yet. Scrape some above to start.'
+            : Object.entries(stats).map(([s, n]) => adminCard(s.replace(/_/g, ' '), n, '#ffd700')).join('');
+        // Status filters
+        const statuses = ['all', 'new', 'queued', 'contacted', 'responded', 'interested', 'signed', 'not_interested', 'dead'];
+        document.getElementById('leads-status-filter').innerHTML = statuses.map(s => {
+            const active = (s === 'all' && !_leadStatusFilter) || _leadStatusFilter === s;
+            return `<button onclick="setLeadFilter('${s === 'all' ? '' : s}')" style="background:${active ? '#ffd700' : 'rgba(255,215,0,0.08)'};color:${active ? '#0a0a0f' : '#ffd700'};border:none;padding:4px 10px;border-radius:4px;font-size:0.7em;cursor:pointer;font-weight:700;">${s}${stats[s] ? ' ('+stats[s]+')' : ''}</button>`;
+        }).join('');
+        // Leads list
+        const leads = data.leads || [];
+        if (leads.length === 0) {
+            document.getElementById('leads-list').textContent = '(no leads matching this filter)';
+            return;
+        }
+        document.getElementById('leads-list').innerHTML = leads.map(l => {
+            const phone = (l.whatsapp || l.phone || '').trim();
+            const statusColors = { new: '#ffd700', queued: '#888', contacted: '#3498db', responded: '#1abc9c', interested: '#00ff88', signed: '#00ff88', not_interested: '#888', dead: '#666', blocked: '#ff4444' };
+            const sc = statusColors[l.status] || '#888';
+            return `<div style="padding:8px 10px;margin-bottom:6px;background:rgba(255,255,255,0.03);border-left:2px solid ${sc};border-radius:6px;">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+                    <div style="flex:1;min-width:0;">
+                        <div style="font-size:0.95em;color:#fff;font-weight:700;">${l.business_name}</div>
+                        <div style="font-size:0.85em;color:#8a9aaa;margin-top:2px;">${l.business_type || ''} · ${l.city || ''} ${l.country ? '· '+l.country : ''}</div>
+                        ${phone ? `<div style="font-size:0.85em;color:#8a9aaa;margin-top:2px;">📞 ${phone}</div>` : ''}
+                        ${l.website ? `<div style="font-size:0.8em;color:#8a9aaa;margin-top:2px;">🌐 <a href="${l.website}" target="_blank" style="color:#8a9aaa;">${l.website.substring(0,40)}</a></div>` : ''}
+                        ${l.address ? `<div style="font-size:0.78em;color:#666;margin-top:2px;">${l.address}</div>` : ''}
+                    </div>
+                    <span style="background:${sc};color:${sc === '#888' || sc === '#666' ? '#fff' : '#0a0a0f'};padding:2px 6px;border-radius:3px;font-size:0.65em;font-weight:900;text-transform:uppercase;white-space:nowrap;">${l.status}</span>
+                </div>
+                <div style="display:flex;gap:5px;margin-top:8px;flex-wrap:wrap;">
+                    ${phone ? `<button onclick="openLeadWhatsApp('${l.id}')" style="background:#25D366;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">💬 WhatsApp</button>` : ''}
+                    <button onclick="setLeadStatus('${l.id}','contacted')" style="background:#3498db;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">Contacted</button>
+                    <button onclick="setLeadStatus('${l.id}','interested')" style="background:#00ff88;color:#0a0a0f;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">Interested</button>
+                    <button onclick="setLeadStatus('${l.id}','not_interested')" style="background:#666;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">Not Interested</button>
+                    <button onclick="setLeadStatus('${l.id}','dead')" style="background:#ff4444;color:#fff;border:none;padding:4px 10px;border-radius:4px;font-size:0.75em;cursor:pointer;font-weight:700;">✕ Dead</button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        document.getElementById('leads-list').textContent = '⚠️ ' + e.message;
+    }
+}
+
+function setLeadFilter(status) {
+    _leadStatusFilter = status || null;
+    loadLeads();
+}
+
+async function setLeadStatus(leadId, status) {
+    try {
+        await fetch('/api/admin/leads/status', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ lead_id: leadId, status }) });
+        loadLeads();
+    } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function openLeadWhatsApp(leadId) {
+    try {
+        const res = await fetch('/api/admin/leads/whatsapp', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ lead_id: leadId }) });
+        const data = await res.json();
+        if (data.error) { alert('Cannot generate WA link: ' + data.error); return; }
+        window.open(data.url, '_blank');
+        loadLeads(); // Refresh — status auto-bumps from 'new' to 'contacted'.
+    } catch (e) { alert('Failed: ' + e.message); }
+}
+
+async function scrapeLeadsAndImport() {
+    const keyword = document.getElementById('leads-keyword').value.trim();
+    const city = document.getElementById('leads-city').value.trim();
+    const country = document.getElementById('leads-country').value.trim() || 'Indonesia';
+    if (!keyword || !city) { alert('Enter a category and a city'); return; }
+    const btn = document.getElementById('leads-scrape-btn');
+    const result = document.getElementById('leads-scrape-result');
+    btn.disabled = true;
+    btn.textContent = 'Scraping OpenStreetMap…';
+    result.innerHTML = '<span style="color:#ffd700;">⏳ Running real query — no fake progress.</span>';
+    try {
+        const res = await fetch('/api/admin/leads/import', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ keyword, city, country, limit: 50 }) });
+        const data = await res.json();
+        if (data.error) {
+            result.innerHTML = '<span style="color:#ff4444;">⚠️ ' + data.error + '</span>';
+        } else {
+            const s = data.summary;
+            result.innerHTML = `<div style="color:#00ff88;font-weight:700;">✓ Imported ${s.inserted} new leads</div>
+                <div style="color:#8a9aaa;margin-top:4px;">Skipped ${s.skipped} duplicates · ${s.errors} errors</div>
+                ${(data.preview || []).map(p => `<div style="margin-top:4px;color:#cdd5e0;font-size:0.85em;">• ${p.business_name}${p.phone ? ' · 📞 '+p.phone : ''}</div>`).join('')}`;
+            loadLeads();
+        }
+    } catch (e) {
+        result.innerHTML = '<span style="color:#ff4444;">⚠️ ' + e.message + '</span>';
+    }
+    btn.disabled = false;
+    btn.textContent = 'Find + Import to CRM';
 }
 
 // ─── Admin dashboard loaders — fetch live Supabase data via 2bee API ───
